@@ -15,7 +15,10 @@ Respool is an independent project and is not affiliated with Anthropic.
 - **Search.** Searches session titles and the conversations themselves, and shows an excerpt
   of the match.
 - **Projects.** Groups sessions by git remote, so one repository checked out in several
-  folders shows up as one project. Projects can be merged and renamed by hand.
+  folders shows up as one project. Projects can be merged and renamed by hand. The menu beside
+  the list's title sorts them by last activity, name, session count or token use, and leaves
+  out those with a single session or none in the last 30 days. A project can be hidden from its
+  context menu; hidden projects are still found by search and come back in Settings.
 - **Pins and tasks.** Pin the sessions you keep returning to and keep a short task list on each.
 - **Calendar.** Plan tasks by day on a calendar at the top of the panel. It shows a week, or a
   whole month when you click its title, with a dot under each day that has open tasks. Tasks

@@ -207,10 +207,19 @@ struct PanelView: View {
         CollapsibleHeader(
             library: library, title: "Projeler",
             section: PanelSection.projects, count: library.projects.count
-        )
+        ) {
+            ProjectListMenu(library: library)
+        }
         if !library.isCollapsed(PanelSection.projects) {
             ForEach(library.projects) { project in
                 ProjectSection(library: library, project: project, focus: $focus)
+            }
+            if library.projects.isEmpty, !library.allProjects.isEmpty {
+                Text("Bütün projeler gizli ya da süzülüyor.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
             }
         }
     }
@@ -317,51 +326,66 @@ struct PanelView: View {
         if let progress = library.indexing, progress.total > 0 {
             return "Dizine ekleniyor \(progress.done) / \(progress.total)"
         }
-        return "\(library.sessionCount) sohbet · \(library.projects.count) proje"
+        // Says how many projects are left out, when the list is thinner than the index.
+        let shown = library.projects.count, total = library.allProjects.count
+        let projects = shown == total ? "\(shown)" : "\(shown)/\(total)"
+        return "\(library.sessionCount) sohbet · \(projects) proje"
     }
 }
 
 // MARK: - Building blocks
 
-/// A section title that hides or shows its section when clicked.
-struct CollapsibleHeader: View {
+/// A section title that hides or shows its section when clicked. `trailing` sits at its right
+/// edge, outside the button, for a control of the section's own.
+struct CollapsibleHeader<Trailing: View>: View {
     @ObservedObject var library: Library
     let title: String
     let section: String
     var count = 0
+    @ViewBuilder let trailing: () -> Trailing
 
     @State private var hovering = false
 
     var body: some View {
         let collapsed = library.isCollapsed(section)
-        Button {
-            withAnimation(.easeOut(duration: 0.15)) { library.toggleSection(section) }
-        } label: {
-            HStack(spacing: 5) {
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                if collapsed, count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 11))
-                        .monospacedDigit()
+        HStack(spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { library.toggleSection(section) }
+            } label: {
+                HStack(spacing: 5) {
+                    Text(title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    if collapsed, count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                            .foregroundStyle(.tertiary)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(collapsed ? 0 : 90))
+                        .opacity(hovering || collapsed ? 1 : 0)
+                    Spacer(minLength: 0)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(collapsed ? 0 : 90))
-                    .opacity(hovering || collapsed ? 1 : 0)
-                Spacer(minLength: 0)
+                .padding(.horizontal, 8)
+                .padding(.top, 16)
+                .padding(.bottom, 4)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 8)
-            .padding(.top, 16)
-            .padding(.bottom, 4)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help(collapsed ? "Bölümü göster" : "Bölümü gizle")
+            trailing()
+                .padding(.trailing, 4)
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(collapsed ? "Bölümü göster" : "Bölümü gizle")
+    }
+}
+
+extension CollapsibleHeader where Trailing == EmptyView {
+    init(library: Library, title: String, section: String, count: Int = 0) {
+        self.init(library: library, title: title, section: section, count: count) { EmptyView() }
     }
 }
 
@@ -1008,7 +1032,7 @@ struct TaskRow: View {
             Toggle("Tarihsiz", isOn: isDue(nil))
         }
         Menu("Projeye bağla") {
-            ForEach(library.projects) { project in
+            ForEach(library.allProjects) { project in
                 Button(project.name) { library.link(task, toProject: project.key) }
             }
             if !task.sessionID.isEmpty || task.projectKey != nil {
@@ -1693,6 +1717,30 @@ struct SettingsView: View {
                                 .padding(.horizontal, 4)
                         }
                     }
+                    if !library.hiddenProjectList.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Gizli projeler")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                            SettingsGroup {
+                                VStack(spacing: 0) {
+                                    ForEach(library.hiddenProjectList) { project in
+                                        HStack {
+                                            Text(project.name)
+                                                .font(.system(size: 13))
+                                                .lineLimit(1)
+                                            Spacer(minLength: 8)
+                                            Button("Geri getir") { library.unhide(project) }
+                                                .controlSize(.small)
+                                        }
+                                        .padding(.horizontal, 12)
+                                        .frame(height: 34)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 16)
@@ -1865,16 +1913,61 @@ struct ProjectSection: View {
         Button("Görev ekle") { library.beginTask(linkedTo: .project(key: project.key, name: project.name)) }
         Button("Yeniden adlandır") { library.renamingProject = project.key }
         Menu("Şununla birleştir") {
-            ForEach(library.projects.filter { $0.key != project.key }) { other in
+            ForEach(library.allProjects.filter { $0.key != project.key }) { other in
                 Button(other.name) { library.merge(project, into: other) }
             }
         }
         if !project.mergedKeys.isEmpty {
             Button("Birleştirmeyi geri al") { library.separate(project) }
         }
+        Divider()
+        Button("Gizle") { library.hide(project) }
         if let folder = project.folders.first {
-            Divider()
             Button("Klasörü Finder'da göster") { Opener.revealFolder(folder) }
         }
+    }
+}
+
+/// Sorts and filters the project list. The choices stay as they are left, and the icon is
+/// tinted while anything is being left out.
+struct ProjectListMenu: View {
+    @ObservedObject var library: Library
+
+    var body: some View {
+        // AppKit draws a menu's label in its own color, so the icon is drawn here and the menu
+        // on top of it has a clear label: it takes the click and shows nothing.
+        Image(systemName: "line.3.horizontal.decrease")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(leavesSomethingOut ? Color.accentColor : Color.secondary)
+            .frame(width: 22, height: 22)
+            .overlay {
+                Menu { choices } label: { Color.clear.frame(width: 22, height: 22) }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Projeleri sırala ya da süz")
+            }
+    }
+
+    @ViewBuilder private var choices: some View {
+        Menu("Sıralama") {
+            ForEach(ProjectSort.allCases, id: \.self) { sort in
+                Toggle(sort.title, isOn: Binding(
+                    get: { library.projectSort == sort },
+                    set: { _ in library.projectSort = sort }
+                ))
+            }
+        }
+        Divider()
+        Toggle("Tek sohbetlik projeleri gizle", isOn: $library.hidesSingleSessionProjects)
+        Toggle("Son 30 günde etkin olmayanları gizle", isOn: $library.hidesInactiveProjects)
+        if !library.hiddenProjects.isEmpty {
+            Divider()
+            Button("Gizli projeleri yönet…") { library.showingSettings = true }
+        }
+    }
+
+    private var leavesSomethingOut: Bool {
+        library.hidesSingleSessionProjects || library.hidesInactiveProjects || !library.hiddenProjects.isEmpty
     }
 }

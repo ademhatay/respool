@@ -44,10 +44,21 @@ func value(after flag: String) -> String? {
     return arguments[index + 1]
 }
 
+/// Forgets what an earlier developer run left of the list's choices, so each one starts from
+/// the defaults. The bare binary keeps its own preferences, apart from the installed app's.
+func forgetListChoices() {
+    for key in [
+        "calendarExpanded", "projectSort", "hidesSingleSessionProjects", "hidesInactiveProjects", "hiddenProjects",
+    ] {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
 if let output = value(after: "--snapshot") {
     // Developer mode: draw the panel to a PNG and exit.
     _ = NSApplication.shared
     do {
+        forgetListChoices()
         let library = try Library()
         library.reloadSync()
         if arguments.contains("--seed-tags"), ProcessInfo.processInfo.environment["RESPOOL_DB"] != nil {
@@ -105,6 +116,15 @@ if let output = value(after: "--snapshot") {
             library.selectedDay = key
             library.calendarAnchor = date
         }
+        if let name = value(after: "--sort"), let sort = ProjectSort.allCases.first(where: { String(describing: $0) == name }) {
+            library.projectSort = sort
+        }
+        if arguments.contains("--hide-single") { library.hidesSingleSessionProjects = true }
+        if arguments.contains("--hide-inactive") { library.hidesInactiveProjects = true }
+        if let name = value(after: "--hide"), let project = library.allProjects.first(where: { $0.name == name }) {
+            library.hide(project)
+        }
+        library.reloadSync()
         if arguments.contains("--settings") {
             library.shortcutLabel = Shortcut.standard.label
             library.showsOrganizations = arguments.contains("--accounts")
@@ -162,6 +182,7 @@ if arguments.contains("--selftest") {
         if !passed { exit(1) }
     }
     do {
+        forgetListChoices()
         let library = try Library()
         library.reloadSync()
         guard let session = library.recent.first, library.projects.count >= 2 else {
@@ -316,6 +337,53 @@ if arguments.contains("--selftest") {
         check("run starts a session for a project's task",
               started?.prompt == projectTask.text || (!hasFolder && library.notice == "Proje klasörü bulunamadı"))
         library.onStartSession = nil
+
+        // Sorting and hiding only change the list; every project stays known.
+        func inOrder(_ sort: ProjectSort) -> Bool {
+            zip(library.projects, library.projects.dropFirst()).allSatisfy { !sort.areInOrder($1, $0) }
+        }
+        check("projects start in order of last activity",
+              library.projects.map(\.key) == library.allProjects.map(\.key) && inOrder(.activity))
+        library.projectSort = .name; settle()
+        check("projects sort by name", inOrder(.name) && library.projects.count == library.allProjects.count)
+        library.projectSort = .sessions; settle()
+        check("projects sort by session count", inOrder(.sessions))
+        library.projectSort = .tokens; settle()
+        check("projects sort by token use", inOrder(.tokens))
+        library.hidesSingleSessionProjects = true; settle()
+        check("single-session projects are left out, in order",
+              library.projects.allSatisfy { $0.sessions.count > 1 }
+              && library.projects.count == library.allProjects.filter { $0.sessions.count > 1 }.count
+              && inOrder(.tokens))
+        library.hidesInactiveProjects = true; settle()
+        let cutoff = Date().addingTimeInterval(-30 * 86_400)
+        func wasActive(_ project: ProjectGroup) -> Bool { (project.lastActivity ?? .distantPast) >= cutoff }
+        check("projects quiet for 30 days are left out",
+              library.projects.allSatisfy(wasActive)
+              && library.projects.count == library.allProjects.filter { $0.sessions.count > 1 && wasActive($0) }.count)
+        library.projectSort = .activity
+        library.hidesSingleSessionProjects = false
+        library.hidesInactiveProjects = false; settle()
+        check("turning the filters off brings every project back",
+              library.projects.map(\.key) == library.allProjects.map(\.key))
+
+        library.hide(target); settle()
+        check("a hidden project leaves the list", !library.projects.contains { $0.key == target.key }
+            && library.allProjects.contains { $0.key == target.key })
+        check("its sessions leave the recents too", !library.recent.contains { $0.projectKey == target.key })
+        check("a hidden project still names the tasks linked to it",
+              library.linkTitle(for: projectTask)?.title == target.name)
+        if let probe = target.sessions.first {
+            library.query = String(probe.title.prefix(16)); library.searchSync()
+            check("a hidden project is still found by search", library.results?.contains { $0.id == probe.id } == true)
+            library.query = ""
+        }
+        check("hidden projects are remembered",
+              UserDefaults.standard.stringArray(forKey: "hiddenProjects") == [target.key]
+              && library.hiddenProjectList.map(\.key) == [target.key])
+        library.unhide(target); settle()
+        check("a hidden project can be brought back",
+              library.projects.contains { $0.key == target.key } && library.hiddenProjectList.isEmpty)
 
         for item in library.tasks { library.delete(item) }
         settle()

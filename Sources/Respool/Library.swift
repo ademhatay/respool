@@ -15,6 +15,8 @@ final class Library: ObservableObject {
     @Published private(set) var pinned: [PinnedSession] = []
     @Published private(set) var recent: [SessionRecord] = []
     @Published private(set) var projects: [ProjectGroup] = []
+    /// Every project the index knows, before the panel sorts and filters them.
+    @Published private(set) var allProjects: [ProjectGroup] = []
     @Published private(set) var results: [SearchHit]?
     @Published private(set) var sessionCount = 0
     @Published private(set) var indexing: IndexProgress?
@@ -55,6 +57,31 @@ final class Library: ObservableObject {
     }
     @Published var tagFilter: Int64? {
         didSet { if tagFilter != oldValue { reload() } }
+    }
+    @Published var projectSort = ProjectSort.activity {
+        didSet {
+            guard projectSort != oldValue else { return }
+            UserDefaults.standard.set(projectSort.rawValue, forKey: "projectSort")
+            reload()
+        }
+    }
+    @Published var hidesSingleSessionProjects = false {
+        didSet {
+            guard hidesSingleSessionProjects != oldValue else { return }
+            UserDefaults.standard.set(hidesSingleSessionProjects, forKey: "hidesSingleSessionProjects")
+            reload()
+        }
+    }
+    @Published var hidesInactiveProjects = false {
+        didSet {
+            guard hidesInactiveProjects != oldValue else { return }
+            UserDefaults.standard.set(hidesInactiveProjects, forKey: "hidesInactiveProjects")
+            reload()
+        }
+    }
+    /// Projects hidden by hand, by key. They still turn up in a search.
+    @Published private(set) var hiddenProjects: Set<String> = [] {
+        didSet { UserDefaults.standard.set(hiddenProjects.sorted(), forKey: "hiddenProjects") }
     }
     @Published var tagEditor: TagEditor?
     /// The row the pointer has rested on long enough to show its details.
@@ -138,6 +165,10 @@ final class Library: ObservableObject {
         collapsedSections = Set(UserDefaults.standard.stringArray(forKey: "collapsedSections") ?? [])
         notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         organizationFilter = showsOrganizations ? UserDefaults.standard.string(forKey: "organizationFilter") : nil
+        projectSort = ProjectSort(rawValue: UserDefaults.standard.integer(forKey: "projectSort")) ?? .activity
+        hidesSingleSessionProjects = UserDefaults.standard.bool(forKey: "hidesSingleSessionProjects")
+        hidesInactiveProjects = UserDefaults.standard.bool(forKey: "hidesInactiveProjects")
+        hiddenProjects = Set(UserDefaults.standard.stringArray(forKey: "hiddenProjects") ?? [])
     }
 
     // MARK: - Loading
@@ -147,6 +178,8 @@ final class Library: ObservableObject {
         var pinned: [PinnedSession] = []
         var recent: [SessionRecord] = []
         var projects: [ProjectGroup] = []
+        var allProjects: [ProjectGroup] = []
+        var hidden: Set<String> = []
         var desktop = DesktopSessions.Index()
         var live: [String: LiveSession] = [:]
         var tags: [Tag] = []
@@ -155,11 +188,29 @@ final class Library: ObservableObject {
         var tagged: [SessionRecord]?
     }
 
+    /// How the project list is thinned and ordered. Read on the main thread before loading.
+    private struct ProjectArrangement {
+        var sort = ProjectSort.activity
+        var hideSingle = false
+        var hideInactive = false
+        var hidden: Set<String> = []
+    }
+
+    private var projectArrangement: ProjectArrangement {
+        ProjectArrangement(
+            sort: projectSort, hideSingle: hidesSingleSessionProjects,
+            hideInactive: hidesInactiveProjects, hidden: hiddenProjects
+        )
+    }
+
     func reload() {
         let organization = organizationFilter, tag = tagFilter, named = showsOrganizations
+        let arrangement = projectArrangement
         readQueue.async { [weak self] in
             guard let self else { return }
-            let snapshot = self.buildSnapshot(organization: organization, tag: tag, namesOrganizations: named)
+            let snapshot = self.buildSnapshot(
+                organization: organization, tag: tag, namesOrganizations: named, projects: arrangement
+            )
             DispatchQueue.main.async {
                 // A filter changed while this was loading; a newer reload is already on its way.
                 guard organization == self.organizationFilter, tag == self.tagFilter else { return }
@@ -169,7 +220,10 @@ final class Library: ObservableObject {
     }
 
     func reloadSync() {
-        apply(buildSnapshot(organization: organizationFilter, tag: tagFilter, namesOrganizations: showsOrganizations))
+        apply(buildSnapshot(
+            organization: organizationFilter, tag: tagFilter,
+            namesOrganizations: showsOrganizations, projects: projectArrangement
+        ))
     }
 
     private func apply(_ snapshot: Snapshot) {
@@ -186,14 +240,32 @@ final class Library: ObservableObject {
         }
         pinned = snapshot.pinned
         recent = snapshot.recent
+        allProjects = snapshot.allProjects
         projects = snapshot.projects
+        if hiddenProjects != snapshot.hidden { hiddenProjects = snapshot.hidden }
         sessionCount = snapshot.sessions.count
         hasLoaded = true
         if results != nil { scheduleSearch(immediately: true) }
     }
 
+    /// Leaves out what the user asked not to see and puts the rest in the chosen order.
+    private static func arrange(
+        _ projects: [ProjectGroup], by arrangement: ProjectArrangement, hidden: Set<String>
+    ) -> [ProjectGroup] {
+        let cutoff = Date().addingTimeInterval(-30 * 86_400)
+        return projects
+            .filter { project in
+                if hidden.contains(project.key) { return false }
+                if arrangement.hideSingle && project.sessions.count < 2 { return false }
+                if arrangement.hideInactive && (project.lastActivity ?? .distantPast) < cutoff { return false }
+                return true
+            }
+            .sorted(by: arrangement.sort.areInOrder)
+    }
+
     private func buildSnapshot(
-        organization organizationFilter: String?, tag tagFilter: Int64?, namesOrganizations: Bool
+        organization organizationFilter: String?, tag tagFilter: Int64?, namesOrganizations: Bool,
+        projects arrangement: ProjectArrangement
     ) -> Snapshot {
         var identities: [String: (key: String, name: String)] = [:]
         try? readDB.query("SELECT cwd, key, name FROM cwd_projects") { row in
@@ -336,7 +408,7 @@ final class Library: ObservableObject {
         for (key, _) in merges { mergedInto[finalKey(key), default: []].append(key) }
 
         let grouped = Dictionary(grouping: ordered, by: \.projectKey)
-        snapshot.projects = grouped.map { key, sessions in
+        snapshot.allProjects = grouped.map { key, sessions in
             ProjectGroup(
                 key: key,
                 name: sessions[0].projectName,
@@ -345,7 +417,9 @@ final class Library: ObservableObject {
                 mergedKeys: (mergedInto[key] ?? []).sorted()
             )
         }
-        .sorted { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
+        .sorted(by: ProjectSort.activity.areInOrder)
+        // The key of a project that was merged into another no longer hides anything.
+        snapshot.hidden = arrangement.hidden.intersection(Set(snapshot.allProjects.map(\.key)))
 
         var tasksBySession: [String: [TaskItem]] = [:]
         let cutoff = Date().addingTimeInterval(-86_400).timeIntervalSince1970
@@ -369,7 +443,10 @@ final class Library: ObservableObject {
             snapshot.sessions[id].map { PinnedSession(session: $0, tasks: tasksBySession[id] ?? []) }
         }
         let pinnedSet = Set(pinnedIDs)
-        snapshot.recent = Array(ordered.lazy.filter { !pinnedSet.contains($0.id) }.prefix(Self.recentCount))
+        snapshot.recent = Array(ordered.lazy.filter {
+            !pinnedSet.contains($0.id) && !snapshot.hidden.contains($0.projectKey)
+        }.prefix(Self.recentCount))
+        snapshot.projects = Self.arrange(snapshot.allProjects, by: arrangement, hidden: snapshot.hidden)
         return snapshot
     }
 
@@ -891,12 +968,13 @@ final class Library: ObservableObject {
         todoFocusRequest += 1
     }
 
-    /// The session or project a task is attached to, if it can still be found.
+    /// The session or project a task is attached to, if it can still be found. A project counts
+    /// even when the panel's filters keep it out of the list.
     func linkTitle(for task: TaskItem) -> (symbol: String, title: String)? {
         if !task.sessionID.isEmpty, let session = allSessions[task.sessionID] {
             return ("bubble.left", session.title)
         }
-        if let key = task.projectKey, let project = projects.first(where: { $0.key == key }) {
+        if let key = task.projectKey, let project = allProjects.first(where: { $0.key == key }) {
             return ("folder", project.name)
         }
         return nil
@@ -909,7 +987,7 @@ final class Library: ObservableObject {
             Opener.copy(task.text)
             show(notice: "Görev panoya kopyalandı")
             open(session)
-        } else if let key = task.projectKey, let project = projects.first(where: { $0.key == key }) {
+        } else if let key = task.projectKey, let project = allProjects.first(where: { $0.key == key }) {
             let folder = project.folders.first { FileManager.default.fileExists(atPath: $0) }
             guard let folder else {
                 show(notice: "Proje klasörü bulunamadı")
@@ -1158,6 +1236,24 @@ final class Library: ObservableObject {
         write { db in
             for key in keys { try db.run("DELETE FROM project_merges WHERE key = ?", [key]) }
         }
+    }
+
+    /// Projects hidden by hand, by name, for Settings to offer back.
+    var hiddenProjectList: [ProjectGroup] {
+        allProjects
+            .filter { hiddenProjects.contains($0.key) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Hides a project from the panel. Its sessions can still be found by a search.
+    func hide(_ project: ProjectGroup) {
+        hiddenProjects.insert(project.key)
+        reload()
+    }
+
+    func unhide(_ project: ProjectGroup) {
+        hiddenProjects.remove(project.key)
+        reload()
     }
 
     private func write(_ work: @escaping (Database) throws -> Void) {

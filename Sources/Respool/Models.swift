@@ -122,6 +122,48 @@ struct ProjectGroup: Identifiable, Hashable {
 
     var id: String { key }
     var lastActivity: Date? { sessions.first?.lastActivity }
+
+    /// Everything the sessions read and wrote, cached input included.
+    var tokenUse: Int {
+        sessions.reduce(0) { $0 + $1.inputTokens + $1.cachedTokens + $1.outputTokens }
+    }
+}
+
+/// The orders the project list can be put in. The raw value is what is saved.
+enum ProjectSort: Int, CaseIterable, Hashable {
+    case activity, name, sessions, tokens
+
+    var title: String {
+        switch self {
+        case .activity: return "Son etkinlik"
+        case .name: return "Ad"
+        case .sessions: return "Sohbet sayısı"
+        case .tokens: return "Token kullanımı"
+        }
+    }
+
+    /// Puts projects in this order, settling ties by name so the list never shuffles.
+    func areInOrder(_ first: ProjectGroup, _ second: ProjectGroup) -> Bool {
+        let a = figure(first), b = figure(second)
+        return a == b ? Self.byName(first, second) : a > b
+    }
+
+    /// What each project is ranked by, largest first. Sorting by name ranks them all the same,
+    /// which leaves the order to the tie-break.
+    private func figure(_ project: ProjectGroup) -> Double {
+        switch self {
+        case .activity: return project.lastActivity?.timeIntervalSince1970 ?? -.infinity
+        case .name: return 0
+        case .sessions: return Double(project.sessions.count)
+        case .tokens: return Double(project.tokenUse)
+        }
+    }
+
+    private static func byName(_ first: ProjectGroup, _ second: ProjectGroup) -> Bool {
+        let order = first.name.localizedStandardCompare(second.name)
+        if order == .orderedSame { return first.key < second.key }
+        return order == .orderedAscending
+    }
 }
 
 struct SearchHit: Identifiable, Hashable {
