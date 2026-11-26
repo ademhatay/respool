@@ -20,6 +20,7 @@ Respool is an independent project and is not affiliated with Anthropic.
   out those with a single session or none in the last 30 days. A project can be hidden from its
   context menu; hidden projects are still found by search and come back in Settings.
 - **Pins and tasks.** Pin the sessions you keep returning to and keep a short task list on each.
+  Drag a pinned session or an open task onto another one to change their order.
 - **Calendar.** Plan tasks by day on a calendar at the top of the panel. It shows a week, or a
   whole month when you click its title, with a dot under each day that has open tasks. Tasks
   whose day has passed are listed with today's.

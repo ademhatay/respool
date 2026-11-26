@@ -83,6 +83,13 @@ struct TaskItem: Identifiable, Hashable {
     var due: String?
     /// The project the task belongs to, when it is linked to one rather than to a session.
     var projectKey: String?
+    var created = Date.distantPast
+    /// Where in its list the task was dragged to. A task that was never dragged is ordered by
+    /// when it was added, which comes after any dragged one.
+    var position: Double?
+
+    /// What the task is ordered by inside its list.
+    var rank: Double { position ?? created.timeIntervalSince1970 }
 }
 
 /// What a new task will be attached to.

@@ -619,17 +619,18 @@ struct TodoSection: View {
         if !overdue.isEmpty {
             groupTitle("Gecikmiş")
             ForEach(overdue) { task in
-                TaskRow(library: library, task: task, listedDay: day)
+                TaskRow(library: library, task: task, listedDay: day, list: overdue)
             }
         }
-        ForEach(library.tasks(on: day)) { task in
-            TaskRow(library: library, task: task, listedDay: day)
+        let due = library.tasks(on: day)
+        ForEach(due) { task in
+            TaskRow(library: library, task: task, listedDay: day, list: due)
         }
         let undated = library.undatedTasks
         if !undated.isEmpty {
             groupTitle("Tarihsiz")
             ForEach(undated) { task in
-                TaskRow(library: library, task: task, listedDay: day)
+                TaskRow(library: library, task: task, listedDay: day, list: undated)
             }
         }
     }
@@ -847,6 +848,8 @@ struct PinnedCard: View {
     var focus: FocusState<PanelField?>.Binding
 
     @State private var draft = ""
+    @State private var targeted = false
+    @State private var height: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -855,13 +858,25 @@ struct PinnedCard: View {
                 rowKey: RowKey.pin(item.id), detail: detailText,
                 onAddTask: startAdding
             )
+            // Only the session's own row is dragged, so the tasks under it can drag themselves.
+            .draggable("pin:\(item.id)")
             ForEach(item.tasks) { task in
-                TaskRow(library: library, task: task, showsLink: false)
+                TaskRow(library: library, task: task, showsLink: false, list: item.tasks)
             }
             if library.addingTaskFor == item.id {
                 addField
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.accentColor.opacity(targeted ? 0.12 : 0))
+        )
+        // The whole card takes the drop: it is a bigger target than the row alone.
+        .dropDestination(for: String.self) { items, location in
+            guard let id = items.first.flatMap(DragPayload.pin) else { return false }
+            library.movePin(id, in: library.pinned.map(\.id), nextTo: item.id, after: location.y > height / 2)
+            return true
+        } isTargeted: { targeted = $0 }
+        .background(HeightReader { height = $0 })
         .onChange(of: focus.wrappedValue) { _, field in
             if field != .task(item.id), draft.isEmpty, library.addingTaskFor == item.id {
                 library.addingTaskFor = nil
@@ -915,6 +930,8 @@ struct TaskRow: View {
     var listedDay: String?
     /// False under a pinned session, whose name is already on the line above.
     var showsLink = true
+    /// The tasks shown together with this one, in order. Among them, open tasks can be dragged.
+    var list: [TaskItem] = []
 
     @State private var hovering = false
 
@@ -987,6 +1004,7 @@ struct TaskRow: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .contextMenu { menu }
+        .modifier(TaskOrdering(library: library, task: task, list: list))
     }
 
     /// What the task is attached to, and when it is due when that is another day.
@@ -1049,6 +1067,61 @@ struct TaskRow: View {
             get: { task.due == day },
             set: { _ in library.setDue(task, to: day) }
         )
+    }
+}
+
+/// What a drag carries as plain text: what kind of thing it is and its id.
+enum DragPayload {
+    static func task(_ text: String) -> Int64? {
+        text.prefix(5) == "task:" ? Int64(text.dropFirst(5)) : nil
+    }
+
+    static func pin(_ text: String) -> String? {
+        text.prefix(4) == "pin:" ? String(text.dropFirst(4)) : nil
+    }
+}
+
+/// Lets an open task be dragged onto another row of its list, above or below it, to change
+/// the order.
+struct TaskOrdering: ViewModifier {
+    let library: Library
+    let task: TaskItem
+    let list: [TaskItem]
+
+    @State private var targeted = false
+    @State private var height: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        if task.done || list.filter({ !$0.done }).count < 2 {
+            content
+        } else {
+            content
+                .draggable("task:\(task.id)")
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.accentColor.opacity(targeted ? 0.16 : 0))
+                )
+                .dropDestination(for: String.self) { items, location in
+                    guard let id = items.first.flatMap(DragPayload.task) else { return false }
+                    library.moveTask(id, in: list, nextTo: task.id, after: location.y > height / 2)
+                    return true
+                } isTargeted: { targeted = $0 }
+                .background(HeightReader { height = $0 })
+        }
+    }
+}
+
+/// Reports how tall the view it sits behind is. A drop uses that to tell the upper half of a
+/// row from its lower one.
+struct HeightReader: View {
+    let report: (CGFloat) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { report(proxy.size.height) }
+                .onChange(of: proxy.size.height) { _, value in report(value) }
+        }
     }
 }
 

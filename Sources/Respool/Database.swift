@@ -186,7 +186,8 @@ enum Schema {
         done_at REAL,
         bucket TEXT,
         due TEXT,
-        project_key TEXT
+        project_key TEXT,
+        position REAL
     );
     CREATE TABLE IF NOT EXISTS project_names(key TEXT PRIMARY KEY, name TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS project_merges(key TEXT PRIMARY KEY, target TEXT NOT NULL);
@@ -225,6 +226,7 @@ extension Schema {
         _ = try? db.exec("ALTER TABLE tasks ADD COLUMN bucket TEXT")
         _ = try? db.exec("ALTER TABLE tasks ADD COLUMN due TEXT")
         _ = try? db.exec("ALTER TABLE tasks ADD COLUMN project_key TEXT")
+        _ = try? db.exec("ALTER TABLE tasks ADD COLUMN position REAL")
         // Version 0.4 filed to-dos under "today" or "this week"; they become dated or undated.
         _ = try? db.run("UPDATE tasks SET due = ? WHERE bucket = 'today' AND due IS NULL", [Format.dayKey(Date())])
         _ = try? db.exec("UPDATE tasks SET bucket = NULL WHERE bucket IS NOT NULL")

@@ -424,13 +424,17 @@ final class Library: ObservableObject {
         var tasksBySession: [String: [TaskItem]] = [:]
         let cutoff = Date().addingTimeInterval(-86_400).timeIntervalSince1970
         try? readDB.query(
-            "SELECT id, session_id, text, done, done_at, due, project_key FROM tasks WHERE done = 0 OR done_at > ? ORDER BY done, id",
+            """
+            SELECT id, session_id, text, done, done_at, due, project_key, position, created
+            FROM tasks WHERE done = 0 OR done_at > ? ORDER BY done, COALESCE(position, created), id
+            """,
             [cutoff]
         ) { row in
             guard let sessionID = row.text(1), let text = row.text(2) else { return }
             let task = TaskItem(
                 id: Int64(row.int(0)), sessionID: sessionID, text: text, done: row.int(3) == 1,
-                doneAt: row.date(4), due: row.text(5), projectKey: row.text(6)
+                doneAt: row.date(4), due: row.text(5), projectKey: row.text(6),
+                created: row.date(8) ?? .distantPast, position: row.double(7)
             )
             snapshot.tasks.append(task)
             if !sessionID.isEmpty { tasksBySession[sessionID, default: []].append(task) }
@@ -729,9 +733,24 @@ final class Library: ObservableObject {
                 try db.run("DELETE FROM pins WHERE session_id = ?", [session.id])
             } else {
                 try db.run(
-                    "INSERT OR REPLACE INTO pins(session_id, position) VALUES(?, ?)",
-                    [session.id, Date().timeIntervalSince1970]
+                    "INSERT OR REPLACE INTO pins(session_id, position) VALUES(?, (SELECT COALESCE(MAX(position), 0) + 1 FROM pins))",
+                    [session.id]
                 )
+            }
+        }
+    }
+
+    /// Moves a pinned session beside another one, below it when `after` is true. The pins are
+    /// numbered again in their new order, so the next one pinned still goes to the end.
+    func movePin(_ id: String, in order: [String], nextTo target: String, after: Bool) {
+        guard id != target, let from = order.firstIndex(of: id) else { return }
+        var order = order
+        order.remove(at: from)
+        guard let index = order.firstIndex(of: target) else { return }
+        order.insert(id, at: index + (after ? 1 : 0))
+        write { db in
+            for (offset, sessionID) in order.enumerated() {
+                try db.run("UPDATE pins SET position = ? WHERE session_id = ?", [Double(offset + 1), sessionID])
             }
         }
     }
@@ -758,6 +777,42 @@ final class Library: ObservableObject {
 
     func delete(_ task: TaskItem) {
         write { db in try db.run("DELETE FROM tasks WHERE id = ?", [task.id]) }
+    }
+
+    /// Moves an open task beside another one in the list it is shown in, below it when `after`
+    /// is true. The task is given a place between its new neighbours, so the rest keep theirs.
+    func moveTask(_ id: Int64, in list: [TaskItem], nextTo target: Int64, after: Bool) {
+        let open = list.filter { !$0.done }
+        guard let from = open.firstIndex(where: { $0.id == id }), let to = open.firstIndex(where: { $0.id == target }),
+              id != target else { return }
+        var order = open
+        let moved = order.remove(at: from)
+        order.insert(moved, at: to + (after ? 1 : 0) - (from < to ? 1 : 0))
+        let at = order.firstIndex { $0.id == id }!
+        let previous = at > 0 ? order[at - 1] : nil
+        let next = at + 1 < order.count ? order[at + 1] : nil
+
+        var rank = moved.rank
+        if let previous, let next {
+            let low = previous.rank, high = next.rank
+            rank = (low + high) / 2
+            // Half-way is not between them when they are as close as numbers can be.
+            if !(rank > low && rank < high) { rank = .nan }
+        } else if let previous {
+            rank = previous.rank + 1
+        } else if let next {
+            rank = next.rank - 1
+        }
+        write { db in
+            if rank.isNaN || rank.isInfinite {
+                // No room between the neighbours: the list is numbered afresh in its new order.
+                for (offset, task) in order.enumerated() {
+                    try db.run("UPDATE tasks SET position = ? WHERE id = ?", [Double(offset + 1), task.id])
+                }
+            } else {
+                try db.run("UPDATE tasks SET position = ? WHERE id = ?", [rank, id])
+            }
+        }
     }
 
     // MARK: - Sections

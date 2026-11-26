@@ -385,9 +385,59 @@ if arguments.contains("--selftest") {
         check("a hidden project can be brought back",
               library.projects.contains { $0.key == target.key } && library.hiddenProjectList.isEmpty)
 
+        // Dragging to reorder. A day of its own keeps these tasks away from the ones above.
+        let far = Format.dayKey(Date().addingTimeInterval(10 * 86_400))
+        library.selectedDay = far
+        for text in ["bir", "iki", "üç"] { library.addTodo(text) }
+        settle()
+        var rows = library.tasks(on: far)
+        check("new tasks line up in the order they were added", rows.map(\.text) == ["bir", "iki", "üç"])
+        library.moveTask(rows[2].id, in: rows, nextTo: rows[0].id, after: false); settle()
+        rows = library.tasks(on: far)
+        check("a task dragged to the top goes first", rows.map(\.text) == ["üç", "bir", "iki"])
+        library.moveTask(rows[0].id, in: rows, nextTo: rows[2].id, after: true); settle()
+        rows = library.tasks(on: far)
+        check("a task dragged below the last one goes last", rows.map(\.text) == ["bir", "iki", "üç"])
+        library.moveTask(rows[0].id, in: rows, nextTo: rows[2].id, after: false); settle()
+        rows = library.tasks(on: far)
+        check("a task dropped on the upper half of a row goes above it", rows.map(\.text) == ["iki", "bir", "üç"])
+        let again = try Library()
+        again.reloadSync()
+        check("the new order is kept across a restart", again.tasks(on: far).map(\.text) == ["iki", "bir", "üç"])
+        library.addTodo("dört"); settle()
+        rows = library.tasks(on: far)
+        check("a task added after a drag goes last", rows.map(\.text) == ["iki", "bir", "üç", "dört"])
+        // Neighbours with no room between them: the list is numbered afresh instead.
+        let db = try Database(path: Paths.database)
+        try db.run("UPDATE tasks SET position = 1 WHERE text IN ('bir', 'iki', 'üç')")
+        library.reloadSync()
+        rows = library.tasks(on: far)
+        check("tasks with the same place fall back to the order they were added",
+              rows.map(\.text) == ["bir", "iki", "üç", "dört"])
+        library.moveTask(rows[2].id, in: rows, nextTo: rows[0].id, after: true); settle()
+        rows = library.tasks(on: far)
+        check("the list is numbered afresh when nothing fits between",
+              rows.map(\.text) == ["bir", "üç", "iki", "dört"] && rows.prefix(3).map(\.position) == [1, 2, 3])
+
         for item in library.tasks { library.delete(item) }
         settle()
         check("tasks deleted", library.tasks.isEmpty && library.undatedTasks.isEmpty && library.overdueTasks.isEmpty)
+
+        // Dragging the pinned sessions.
+        let extras = library.recent.prefix(2)
+        for extra in extras { library.togglePin(extra) }
+        settle()
+        var pins = library.pinned.map(\.id)
+        check("a session pinned later goes to the end of the pins", pins == [session.id] + extras.map(\.id))
+        library.movePin(pins[2], in: pins, nextTo: pins[0], after: false); settle()
+        pins = library.pinned.map(\.id)
+        check("a pin dragged to the top goes first", pins == [extras[1].id, session.id, extras[0].id])
+        library.movePin(pins[0], in: pins, nextTo: pins[2], after: true); settle()
+        check("a pin dragged below the last one goes last",
+              library.pinned.map(\.id) == [session.id, extras[0].id, extras[1].id])
+        for extra in extras { library.togglePin(extra) }
+        settle()
+        check("the other pins are removed again", library.pinned.map(\.id) == [session.id])
 
         var announced: [LiveSession.State] = []
         library.finishThreshold = 0
