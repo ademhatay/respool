@@ -48,7 +48,7 @@ final class Library: ObservableObject {
     private let indexQueue = DispatchQueue(label: "raf.index", qos: .utility)
 
     private var allSessions: [String: SessionRecord] = [:]
-    private var desktopIDs: [String: String] = [:]
+    private var desktop = DesktopSessions.Index()
     private var searchGeneration = 0
     private var isRefreshing = false
     private var noticeGeneration = 0
@@ -68,7 +68,7 @@ final class Library: ObservableObject {
         var pinned: [PinnedSession] = []
         var recent: [SessionRecord] = []
         var projects: [ProjectGroup] = []
-        var desktopIDs: [String: String] = [:]
+        var desktop = DesktopSessions.Index()
         var live: [String: LiveSession] = [:]
     }
 
@@ -86,7 +86,7 @@ final class Library: ObservableObject {
 
     private func apply(_ snapshot: Snapshot) {
         allSessions = snapshot.sessions
-        desktopIDs = snapshot.desktopIDs
+        desktop = snapshot.desktop
         live = snapshot.live
         pinned = snapshot.pinned
         recent = snapshot.recent
@@ -171,7 +171,7 @@ final class Library: ObservableObject {
         }
 
         var snapshot = Snapshot()
-        snapshot.desktopIDs = DesktopSessions.load()
+        snapshot.desktop = DesktopSessions.load()
         snapshot.live = LiveSessions.load()
         snapshot.sessions = Dictionary(uniqueKeysWithValues: ordered.map { ($0.id, $0) })
 
@@ -378,7 +378,16 @@ final class Library: ObservableObject {
     }
 
     func desktopID(for sessionID: String) -> String? {
-        live[sessionID]?.desktopID ?? desktopIDs[sessionID]
+        live[sessionID]?.desktopID ?? desktop.records[sessionID]?.desktopID
+    }
+
+    /// True when the desktop app filed this session under an organization it is not signed in to.
+    /// Its link does nothing until the user switches organization in the Claude app.
+    func isInOtherOrganization(_ sessionID: String) -> Bool {
+        guard live[sessionID] == nil,
+              let current = desktop.currentOrganization,
+              let record = desktop.records[sessionID] else { return false }
+        return record.organization != current
     }
 
     /// Re-reads only which sessions are running, which is cheap enough to do while the panel is open.

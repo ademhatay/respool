@@ -15,8 +15,10 @@ if arguments.contains("--index") {
         for project in library.projects {
             print("  \(project.name)  \(project.sessions.count) sohbet  \(project.folders.count) klasör  [\(project.key)]")
         }
-        let tracked = library.projects.flatMap(\.sessions).filter { library.desktopID(for: $0.id) != nil }.count
-        print("desktop app tracks \(tracked) of \(library.sessionCount)")
+        let everything = library.projects.flatMap(\.sessions)
+        let tracked = everything.filter { library.desktopID(for: $0.id) != nil }.count
+        let elsewhere = everything.filter { library.isInOtherOrganization($0.id) }.count
+        print("desktop app tracks \(tracked) of \(library.sessionCount), \(elsewhere) under another organization")
         if let index = arguments.firstIndex(of: "--link"), index + 1 < arguments.count {
             print("link \(library.desktopID(for: arguments[index + 1]) ?? "none")")
         }

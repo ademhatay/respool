@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = PanelController(library: library)
         library.onOpen = { [weak controller, weak library] session in
             guard let library else { return }
+            if library.isInOtherOrganization(session.id) {
+                library.show(notice: "Diğer hesapta: Claude'da hesabı değiştirin")
+                return
+            }
             controller?.hide()
             Opener.open(session, live: library.live[session.id], desktopID: library.desktopID(for: session.id)) { outcome in
                 guard outcome == .failed else { return }
@@ -37,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let library else { return }
             if let live = library.live[session.id], live.isInTerminal {
                 library.show(notice: "Bu sohbet bir terminalde açık")
+                return
+            }
+            if library.isInOtherOrganization(session.id) {
+                library.show(notice: "Diğer hesapta: Claude'da hesabı değiştirin")
                 return
             }
             controller?.hide()

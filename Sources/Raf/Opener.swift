@@ -127,13 +127,25 @@ enum DesktopSessions {
     private static let localPattern = try! Regex(#""sessionId"\s*:\s*"(local_[0-9a-f-]+)""#)
     private static let cliPattern = try! Regex(#""cliSessionId"\s*:\s*"([0-9a-f-]{36})""#)
 
-    /// Maps a transcript's session id to the desktop app's id for the same session.
-    static func load() -> [String: String] {
+    struct Record: Hashable {
+        let desktopID: String
+        let organization: String
+    }
+
+    struct Index {
+        var records: [String: Record] = [:]
+        /// The organization the desktop app last wrote to, taken as the one it is signed in to.
+        var currentOrganization: String?
+    }
+
+    /// Maps a transcript's session id to the desktop app's record of the same session.
+    static func load() -> Index {
         let manager = FileManager.default
         func children(_ url: URL) -> [URL] {
             (try? manager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
         }
-        var map: [String: String] = [:]
+        var index = Index()
+        var newest = Date.distantPast
         for account in children(root) {
             for organization in children(account) {
                 for file in children(organization)
@@ -143,10 +155,18 @@ enum DesktopSessions {
                     try? handle.close()
                     guard let local = head.firstMatch(of: localPattern)?.output[1].substring,
                           let cli = head.firstMatch(of: cliPattern)?.output[1].substring else { continue }
-                    map[String(cli)] = String(local)
+                    index.records[String(cli)] = Record(
+                        desktopID: String(local), organization: organization.lastPathComponent
+                    )
+                    let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                        .contentModificationDate ?? .distantPast
+                    if modified > newest {
+                        newest = modified
+                        index.currentOrganization = organization.lastPathComponent
+                    }
                 }
             }
         }
-        return map
+        return index
     }
 }
