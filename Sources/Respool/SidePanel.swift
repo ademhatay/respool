@@ -163,8 +163,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         detailBackdrop.addSubview(hosting)
 
         let visible = screen.visibleFrame
-        let rowY = panel.frame.maxY - target.rowMidY
-        let y = min(max(rowY - size.height / 2, visible.minY + Metrics.screenInset),
+        let y = min(max(target.screenY - size.height / 2, visible.minY + Metrics.screenInset),
                     visible.maxY - size.height - Metrics.screenInset)
         let frame = NSRect(x: panel.frame.minX - size.width - 8, y: y, width: size.width, height: size.height)
         let wasVisible = detailPanel.isVisible

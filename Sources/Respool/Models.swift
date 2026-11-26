@@ -149,8 +149,28 @@ struct ActivitySeries: Hashable {
 
 struct HoverTarget: Hashable {
     var subject: HoverSubject
-    /// Vertical center of the row, measured down from the top of the panel.
-    var rowMidY: CGFloat
+    /// Where the pointer was on the screen, so the card can open level with it.
+    var screenY: CGFloat
+}
+
+/// One thing the user typed in a session.
+struct OutlineEntry: Identifiable, Hashable {
+    let id: Int
+    var text: String
+    var date: Date?
+}
+
+/// Everything the user asked in one session, in order.
+struct SessionOutline: Hashable {
+    var session: SessionRecord
+    var entries: [OutlineEntry]
+}
+
+enum PanelSection {
+    static let todos = "todos"
+    static let pinned = "pinned"
+    static let recent = "recent"
+    static let projects = "projects"
 }
 
 enum Format {
@@ -204,6 +224,28 @@ enum Format {
 
     static func shortDate(_ date: Date) -> String {
         shortDateTime.string(from: date)
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.dateFormat = "d MMMM EEEE"
+        return formatter
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    static func day(_ date: Date) -> String {
+        dayFormatter.string(from: date)
+    }
+
+    static func time(_ date: Date?) -> String {
+        date.map(timeFormatter.string(from:)) ?? ""
     }
 
     /// A length of time in its two largest units, such as "6 sa 40 dk" or "3 gün 2 sa".

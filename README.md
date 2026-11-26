@@ -25,6 +25,8 @@ Respool is an independent project and is not affiliated with Anthropic.
   the session.
 - **Live status.** Shows which sessions are running, and whether Claude is working or waiting
   for you.
+- **Prompt outline.** Open any session's outline to read everything you asked in it, in order,
+  without opening the session itself.
 - **Details on hover.** Rest the pointer on a session or project for a card with a context
   gauge, token usage, an activity chart, transcript size, model, branch and folder.
 - **Opening.** A session opens where it lives: in the Claude desktop app, by bringing its

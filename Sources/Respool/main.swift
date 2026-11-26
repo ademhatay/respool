@@ -78,10 +78,17 @@ if let output = value(after: "--snapshot") {
             library.showingSettings = true
         }
         if arguments.contains("--detail"), let session = library.recent.dropFirst().first {
-            library.hover = HoverTarget(subject: .session(session), rowMidY: 200)
+            library.hover = HoverTarget(subject: .session(session), screenY: 0)
         }
         if arguments.contains("--detail-project"), let project = library.projects.max(by: { $0.sessions.count < $1.sessions.count }) {
-            library.hover = HoverTarget(subject: .project(project), rowMidY: 200)
+            library.hover = HoverTarget(subject: .project(project), screenY: 0)
+        }
+        if arguments.contains("--outline"), let session = library.recent.max(by: { $0.messageCount < $1.messageCount }) {
+            library.showOutlineSync(for: session)
+        }
+        if arguments.contains("--collapse") {
+            library.toggleSection(PanelSection.recent)
+            if !library.isCollapsed(PanelSection.recent) { library.toggleSection(PanelSection.recent) }
         }
         library.loadActivitySync()
         if arguments.contains("--preview-pins") { library.applyPreviewPins() }
@@ -185,6 +192,15 @@ if arguments.contains("--selftest") {
             library.showsOrganizations = false; settle()
             check("turning accounts off clears the filter", library.organizationFilter == nil && library.sessionCount == everything)
         }
+
+        library.showOutlineSync(for: session)
+        check("outline lists every prompt", library.outline?.entries.count == session.messageCount && session.messageCount > 0)
+        library.closeOutline()
+        check("outline closes", library.outline == nil)
+        let wasCollapsed = library.isCollapsed(PanelSection.recent)
+        library.toggleSection(PanelSection.recent)
+        check("section toggles", library.isCollapsed(PanelSection.recent) != wasCollapsed)
+        library.toggleSection(PanelSection.recent)
 
         library.addTodo("faturaları gönder")
         library.todoBucket = TodoBucket.week

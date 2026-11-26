@@ -53,6 +53,11 @@ final class Library: ObservableObject {
     /// Activity over time for the hovered row; arrives a moment after `hover` is set.
     @Published private(set) var hoverActivity: ActivitySeries?
     @Published var showingSettings = false
+    /// The session whose prompts are being listed, when that view is open.
+    @Published private(set) var outline: SessionOutline?
+    @Published private(set) var collapsedSections: Set<String> {
+        didSet { UserDefaults.standard.set(Array(collapsedSections), forKey: "collapsedSections") }
+    }
     @Published var todoBucket = TodoBucket.today
     @Published var showsTodos: Bool {
         didSet { UserDefaults.standard.set(showsTodos, forKey: "showsTodos") }
@@ -118,6 +123,7 @@ final class Library: ObservableObject {
         expanded = Set(UserDefaults.standard.stringArray(forKey: "expandedProjects") ?? [])
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
         showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true
+        collapsedSections = Set(UserDefaults.standard.stringArray(forKey: "collapsedSections") ?? [])
         notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         organizationFilter = showsOrganizations ? UserDefaults.standard.string(forKey: "organizationFilter") : nil
     }
@@ -490,15 +496,19 @@ final class Library: ObservableObject {
     private var visibleKeys: [String] {
         if let results { return results.map { RowKey.hit($0.id) } }
         if let tagged { return tagged.map { RowKey.tagged($0.id) } }
-        var keys = pinned.map { RowKey.pin($0.id) } + recent.map { RowKey.recent($0.id) }
-        for project in projects where expanded.contains(project.key) {
-            keys += visibleSessions(in: project).map { RowKey.project($0.id) }
+        var keys: [String] = []
+        if !isCollapsed(PanelSection.pinned) { keys += pinned.map { RowKey.pin($0.id) } }
+        if !isCollapsed(PanelSection.recent) { keys += recent.map { RowKey.recent($0.id) } }
+        if !isCollapsed(PanelSection.projects) {
+            for project in projects where expanded.contains(project.key) {
+                keys += visibleSessions(in: project).map { RowKey.project($0.id) }
+            }
         }
         return keys
     }
 
     func moveSelection(_ delta: Int) {
-        guard !showingSettings else { return }
+        guard !showingSettings, outline == nil else { return }
         let keys = visibleKeys
         guard !keys.isEmpty else { return }
         guard let selection, let index = keys.firstIndex(of: selection) else {
@@ -510,7 +520,7 @@ final class Library: ObservableObject {
 
     @discardableResult
     func openSelection() -> Bool {
-        guard !showingSettings, let selection, let session = allSessions[RowKey.sessionID(selection)] else { return false }
+        guard !showingSettings, outline == nil, let selection, let session = allSessions[RowKey.sessionID(selection)] else { return false }
         onOpen?(session)
         return true
     }
@@ -558,8 +568,9 @@ final class Library: ObservableObject {
             focusRequest += 1
             return false
         }
-        if showingSettings {
+        if showingSettings || outline != nil {
             showingSettings = false
+            outline = nil
             focusRequest += 1
             return false
         }
@@ -589,6 +600,7 @@ final class Library: ObservableObject {
         renamingProject = nil
         tagEditor = nil
         showingSettings = false
+        outline = nil
         cancelShortcutRecording()
         focusRequest += 1
         refresh()
@@ -651,6 +663,67 @@ final class Library: ObservableObject {
 
     func delete(_ task: TaskItem) {
         write { db in try db.run("DELETE FROM tasks WHERE id = ?", [task.id]) }
+    }
+
+    // MARK: - Sections
+
+    func isCollapsed(_ section: String) -> Bool {
+        collapsedSections.contains(section)
+    }
+
+    func toggleSection(_ section: String) {
+        if collapsedSections.contains(section) {
+            collapsedSections.remove(section)
+        } else {
+            collapsedSections.insert(section)
+        }
+    }
+
+    // MARK: - Outline
+
+    /// Opens the list of everything the user asked in a session.
+    func showOutline(for session: SessionRecord) {
+        hover = nil
+        readQueue.async { [weak self] in
+            guard let self else { return }
+            let outline = self.loadOutline(for: session)
+            DispatchQueue.main.async { self.outline = outline }
+        }
+    }
+
+    func showOutlineSync(for session: SessionRecord) {
+        outline = loadOutline(for: session)
+    }
+
+    func closeOutline() {
+        outline = nil
+        focusRequest += 1
+    }
+
+    private func loadOutline(for session: SessionRecord) -> SessionOutline {
+        var entries: [OutlineEntry] = []
+        try? readDB.query(
+            "SELECT rowid, text, ts FROM messages WHERE session_id = ? AND role = 'u' ORDER BY rowid",
+            [session.id]
+        ) { row in
+            guard let text = row.text(1) else { return }
+            entries.append(OutlineEntry(id: row.int(0), text: Self.outlineText(text), date: row.date(2)))
+        }
+        return SessionOutline(session: session, entries: entries)
+    }
+
+    private static let pastedBlock = try! NSRegularExpression(
+        pattern: "<pasted_content[^>]*>.*?(</pasted_content[^>]*>|$)", options: [.dotMatchesLineSeparators]
+    )
+
+    /// A prompt as shown in the outline: pasted material is named rather than printed, and
+    /// the text is kept to a readable length.
+    private static func outlineText(_ text: String) -> String {
+        let range = NSRange(text.startIndex..., in: text)
+        let cleaned = pastedBlock.stringByReplacingMatches(
+            in: text, range: range, withTemplate: "[yapıştırılan içerik]"
+        )
+        return String(cleaned.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1200))
     }
 
     // MARK: - Attention

@@ -18,6 +18,8 @@ struct PanelView: View {
         VStack(spacing: 0) {
             if library.showingSettings {
                 SettingsView(library: library, focus: $focus)
+            } else if let outline = library.outline {
+                OutlineView(library: library, outline: outline)
             } else {
                 searchBar
                 filterBar
@@ -166,25 +168,40 @@ struct PanelView: View {
         }
 
         if !library.pinned.isEmpty {
-            SectionHeader(title: "Sabitlenenler")
-            ForEach(library.pinned) { item in
-                PinnedCard(library: library, item: item, focus: $focus)
+            CollapsibleHeader(
+                library: library, title: "Sabitlenenler",
+                section: PanelSection.pinned, count: library.pinned.count
+            )
+            if !library.isCollapsed(PanelSection.pinned) {
+                ForEach(library.pinned) { item in
+                    PinnedCard(library: library, item: item, focus: $focus)
+                }
             }
         }
 
         if !library.recent.isEmpty {
-            SectionHeader(title: "Son sohbetler")
-            ForEach(library.recent) { session in
-                SessionRow(
-                    library: library, session: session,
-                    rowKey: RowKey.recent(session.id), detail: session.placeLabel
-                )
+            CollapsibleHeader(
+                library: library, title: "Son sohbetler",
+                section: PanelSection.recent, count: library.recent.count
+            )
+            if !library.isCollapsed(PanelSection.recent) {
+                ForEach(library.recent) { session in
+                    SessionRow(
+                        library: library, session: session,
+                        rowKey: RowKey.recent(session.id), detail: session.placeLabel
+                    )
+                }
             }
         }
 
-        SectionHeader(title: "Projeler")
-        ForEach(library.projects) { project in
-            ProjectSection(library: library, project: project, focus: $focus)
+        CollapsibleHeader(
+            library: library, title: "Projeler",
+            section: PanelSection.projects, count: library.projects.count
+        )
+        if !library.isCollapsed(PanelSection.projects) {
+            ForEach(library.projects) { project in
+                ProjectSection(library: library, project: project, focus: $focus)
+            }
         }
     }
 
@@ -296,6 +313,48 @@ struct PanelView: View {
 
 // MARK: - Building blocks
 
+/// A section title that hides or shows its section when clicked.
+struct CollapsibleHeader: View {
+    @ObservedObject var library: Library
+    let title: String
+    let section: String
+    var count = 0
+
+    @State private var hovering = false
+
+    var body: some View {
+        let collapsed = library.isCollapsed(section)
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { library.toggleSection(section) }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                if collapsed, count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    .opacity(hovering || collapsed ? 1 : 0)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 16)
+            .padding(.bottom, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(collapsed ? "Bölümü göster" : "Bölümü gizle")
+    }
+}
+
 struct SectionHeader: View {
     let title: String
 
@@ -406,6 +465,9 @@ struct SessionRow: View {
                     if let onAddTask {
                         IconButton(symbol: "plus", help: "Görev ekle", style: style, action: onAddTask)
                     }
+                    IconButton(symbol: "list.bullet", help: "İstem dökümü", style: style) {
+                        library.showOutline(for: session)
+                    }
                     IconButton(
                         symbol: pinned ? "pin.slash" : "pin",
                         help: pinned ? "Sabitlemeyi kaldır" : "Sabitle",
@@ -438,6 +500,7 @@ struct SessionRow: View {
             if !Opener.openInTerminal(session) { library.show(notice: "Terminal açılamadı") }
         }
         .disabled(live != nil)
+        Button("İstem dökümü") { library.showOutline(for: session) }
         Divider()
         Button(pinned ? "Sabitlemeyi kaldır" : "Sabitle") { library.togglePin(session) }
         Menu("Etiketler") {
@@ -503,7 +566,17 @@ struct TodoSection: View {
     @State private var draft = ""
 
     var body: some View {
-        SectionHeader(title: "Yapılacaklar")
+        CollapsibleHeader(
+            library: library, title: "Yapılacaklar",
+            section: PanelSection.todos, count: library.todos.filter { !$0.done }.count
+        )
+        if !library.isCollapsed(PanelSection.todos) {
+            lists
+            addRow
+        }
+    }
+
+    @ViewBuilder private var lists: some View {
         ForEach([TodoBucket.today, TodoBucket.week], id: \.self) { bucket in
             let items = library.todos(in: bucket)
             if !items.isEmpty {
@@ -524,7 +597,6 @@ struct TodoSection: View {
                 }
             }
         }
-        addRow
     }
 
     private var addRow: some View {
@@ -832,36 +904,33 @@ struct OrganizationEditor: View {
 
 // MARK: - Detail card
 
-private struct RowFrameKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
-}
-
-/// Reports the row to the library once the pointer has rested on it, so its details can be shown.
+/// Reports the row to the library once the pointer has rested on it, so its details can be shown
+/// level with the pointer. Moving to another row while a card is up switches without the wait.
 struct HoverDetail: ViewModifier {
     let library: Library
     let subject: HoverSubject
 
-    @State private var frame: CGRect = .zero
     @State private var pending: DispatchWorkItem?
 
     func body(content: Content) -> some View {
-        content
-            .background(GeometryReader { proxy in
-                Color.clear.preference(key: RowFrameKey.self, value: proxy.frame(in: .global))
-            })
-            .onPreferenceChange(RowFrameKey.self) { frame = $0 }
-            .onHover { inside in
-                pending?.cancel()
-                pending = nil
-                if inside {
-                    let work = DispatchWorkItem { library.hover = HoverTarget(subject: subject, rowMidY: frame.midY) }
-                    pending = work
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
-                } else if library.hover?.subject == subject {
-                    library.hover = nil
+        content.onHover { inside in
+            pending?.cancel()
+            pending = nil
+            if inside {
+                let work = DispatchWorkItem {
+                    library.hover = HoverTarget(subject: subject, screenY: NSEvent.mouseLocation.y)
                 }
+                pending = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + (library.hover == nil ? 0.7 : 0.05), execute: work)
+            } else {
+                // Leave the card up for a moment, so the next row can take it over.
+                let work = DispatchWorkItem {
+                    if library.hover?.subject.key == subject.key { library.hover = nil }
+                }
+                pending = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
             }
+        }
     }
 }
 
@@ -1132,6 +1201,124 @@ struct ActivityChart: View {
             }
         }
         .frame(height: Self.height, alignment: .bottom)
+    }
+}
+
+// MARK: - Prompt outline
+
+/// Everything the user asked in one session, oldest first, grouped by day.
+struct OutlineView: View {
+    @ObservedObject var library: Library
+    let outline: SessionOutline
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            if outline.entries.isEmpty {
+                Text("Bu sohbette yazılmış bir istem bulunamadı.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 48)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(days, id: \.title) { day in
+                            SectionHeader(title: day.title)
+                            ForEach(day.entries) { entry in
+                                OutlineRow(library: library, entry: entry)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 12)
+                }
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Button {
+                library.closeOutline()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Geri")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(outline.session.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(outline.session.placeLabel) · \(outline.entries.count) istem")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 3)
+            Spacer(minLength: 8)
+            Button("Aç") { library.open(outline.session) }
+                .controlSize(.small)
+                .help("Sohbeti aç")
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
+    }
+
+    private var days: [(title: String, entries: [OutlineEntry])] {
+        var groups: [(title: String, entries: [OutlineEntry])] = []
+        for entry in outline.entries {
+            let title = entry.date.map(Format.day) ?? "Tarihsiz"
+            if groups.last?.title == title {
+                groups[groups.count - 1].entries.append(entry)
+            } else {
+                groups.append((title, [entry]))
+            }
+        }
+        return groups
+    }
+}
+
+struct OutlineRow: View {
+    @ObservedObject var library: Library
+    let entry: OutlineEntry
+
+    @State private var hovering = false
+    @State private var expanded = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(Format.time(entry.date))
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(.tertiary)
+                .frame(width: 34, alignment: .leading)
+            Text(entry.text)
+                .font(.system(size: 12))
+                .lineLimit(expanded ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(hovering ? 0.07 : 0))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { expanded.toggle() }
+        .contextMenu {
+            Button("Kopyala") {
+                Opener.copy(entry.text)
+                library.show(notice: "İstem kopyalandı")
+            }
+        }
     }
 }
 
