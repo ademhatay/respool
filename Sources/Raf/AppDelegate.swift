@@ -1,0 +1,111 @@
+import AppKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var library: Library?
+    private var controller: PanelController?
+    private var statusItem: NSStatusItem?
+    private var hotKey: HotKey?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if isAlreadyRunning() {
+            NSApp.terminate(nil)
+            return
+        }
+
+        let library: Library
+        do {
+            library = try Library()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Raf başlatılamadı"
+            alert.informativeText = "Dizin dosyası açılamadı: \(error)"
+            alert.runModal()
+            NSApp.terminate(nil)
+            return
+        }
+        let controller = PanelController(library: library)
+        library.onOpen = { [weak controller, weak library] session in
+            guard let library else { return }
+            controller?.hide()
+            Opener.open(session, live: library.live[session.id], desktopID: library.desktopID(for: session.id)) { outcome in
+                guard outcome == .failed else { return }
+                controller?.show()
+                library.show(notice: "Sohbet açılamadı")
+            }
+        }
+        library.onOpenInDesktop = { [weak controller, weak library] session in
+            guard let library else { return }
+            if let live = library.live[session.id], live.isInTerminal {
+                library.show(notice: "Bu sohbet bir terminalde açık")
+                return
+            }
+            controller?.hide()
+            Opener.openInDesktop(session, desktopID: library.desktopID(for: session.id)) { outcome in
+                guard outcome == .failed else { return }
+                controller?.show()
+                library.show(notice: "Sohbet Claude'da açılamadı")
+            }
+        }
+        self.library = library
+        self.controller = controller
+
+        installStatusItem()
+        let hotKey = HotKey { [weak controller] in controller?.toggle() }
+        if !hotKey.isRegistered { library.shortcutLabel = "" }
+        self.hotKey = hotKey
+
+        library.reload()
+        controller.show()
+    }
+
+    /// Opening the app again (from Finder or Spotlight) brings the panel up.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        controller?.show()
+        return false
+    }
+
+    private func isAlreadyRunning() -> Bool {
+        guard let identifier = Bundle.main.bundleIdentifier else { return false }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: identifier).count > 1
+    }
+
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = item.button {
+            button.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Raf")
+            button.target = self
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.toolTip = "Raf (\(HotKey.displayName))"
+        }
+        statusItem = item
+    }
+
+    @objc private func statusItemClicked() {
+        guard NSApp.currentEvent?.type == .rightMouseUp, let statusItem else {
+            controller?.toggle()
+            return
+        }
+        let menu = NSMenu()
+        let refresh = NSMenuItem(title: "Yenile", action: #selector(refresh), keyEquivalent: "")
+        refresh.target = self
+        menu.addItem(refresh)
+        let login = NSMenuItem(title: "Girişte başlat", action: #selector(toggleLoginItem), keyEquivalent: "")
+        login.target = self
+        login.state = LoginItem.isEnabled ? .on : .off
+        menu.addItem(login)
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Raf'tan çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func refresh() {
+        library?.refresh()
+    }
+
+    @objc private func toggleLoginItem() {
+        library?.setLaunchesAtLogin(!LoginItem.isEnabled)
+    }
+}
