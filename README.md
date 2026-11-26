@@ -17,9 +17,15 @@ Respool is an independent project and is not affiliated with Anthropic.
 - **Projects.** Groups sessions by git remote, so one repository checked out in several
   folders shows up as one project. Projects can be merged and renamed by hand.
 - **Pins and tasks.** Pin the sessions you keep returning to and keep a short task list on each.
+- **Calendar.** Plan tasks by day on a calendar at the top of the panel. It shows a week, or a
+  whole month when you click its title, with a dot under each day that has open tasks. Tasks
+  whose day has passed are listed with today's.
+- **Tasks linked to a session or project.** Add a task from a session's or project's context
+  menu and it stays attached to it. A linked task has a run button: for a session, the task
+  goes on the clipboard and the session opens; for a project, a new session starts in the
+  project's folder with the task as its first prompt. A task's own context menu sets its day,
+  moves it to a project, or deletes it.
 - **Tags.** Give sessions colored tags and filter the list by tag.
-- **To-dos.** A short list for today and for this week, for the things that belong to no
-  session in particular.
 - **Notifications.** When a session finishes or starts waiting for you, Respool posts a
   notification and shows a count next to its menu bar icon. Clicking the notification opens
   the session.

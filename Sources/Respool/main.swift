@@ -61,15 +61,49 @@ if let output = value(after: "--snapshot") {
             if arguments.contains("--filter-tag") { library.tagFilter = library.tags.first?.id }
             library.reloadSync()
         }
+        // The month view would otherwise stick, since the calendar's shape is remembered.
+        library.calendarExpanded = arguments.contains("--month")
         if arguments.contains("--seed-todos"), ProcessInfo.processInfo.environment["RESPOOL_DB"] != nil {
-            for (text, bucket) in [("Vernal gecikmesini müşteriye yaz", TodoBucket.today), ("Faturaları gönder", TodoBucket.today), ("Sunucu yedeğini kontrol et", TodoBucket.week)] {
-                library.todoBucket = bucket
+            // Sample tasks for screenshots. They are written to the index, so this only runs
+            // against a throwaway copy.
+            let day = 86_400.0
+            func plan(_ text: String, daysFromNow: Int, linkedTo link: TaskLink? = nil, undated: Bool = false) {
+                library.selectedDay = Format.dayKey(Date().addingTimeInterval(Double(daysFromNow) * day))
+                library.taskLink = link
                 library.addTodo(text)
                 RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+                if undated, let task = library.tasks.first(where: { $0.text == text }) {
+                    library.setDue(task, to: nil)
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+                }
             }
-            library.todoBucket = TodoBucket.today
+            plan("Vernal gecikmesini müşteriye yaz", daysFromNow: 0)
+            plan("Faturaları gönder", daysFromNow: 0)
+            plan("Sunucu yedeğini kontrol et", daysFromNow: 1)
+            plan("Sözleşme taslağını gözden geçir", daysFromNow: -3)
+            plan("Kütüphane sürümlerini yükselt", daysFromNow: 0, undated: true)
+            if let session = library.recent.first {
+                plan("Oturum açma hatasını tekrar dene", daysFromNow: 0, linkedTo: .session(id: session.id, title: session.title))
+            }
+            if let project = library.projects.first {
+                plan("README'ye kurulum bölümü ekle", daysFromNow: 2, linkedTo: .project(key: project.key, name: project.name))
+            }
+            // One finished today, to show how a done task reads.
+            if let task = library.tasks.first(where: { $0.text == "Faturaları gönder" }) {
+                library.toggle(task)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            }
+            library.showToday()
             library.reloadSync()
-            if let first = library.todos.first { library.toggle(first); RunLoop.main.run(until: Date().addingTimeInterval(0.3)); library.reloadSync() }
+        }
+        if arguments.contains("--task-link"), let session = library.recent.first {
+            // Shows the chip that names what the next task will be attached to.
+            library.taskLink = .session(id: session.id, title: session.title)
+        }
+        if let key = value(after: "--day"), let date = Format.date(fromDayKey: key) {
+            // Opens the calendar on another day.
+            library.selectedDay = key
+            library.calendarAnchor = date
         }
         if arguments.contains("--settings") {
             library.shortcutLabel = Shortcut.standard.label
@@ -202,19 +236,90 @@ if arguments.contains("--selftest") {
         check("section toggles", library.isCollapsed(PanelSection.recent) != wasCollapsed)
         library.toggleSection(PanelSection.recent)
 
-        library.addTodo("faturaları gönder")
-        library.todoBucket = TodoBucket.week
-        library.addTodo("sunucu yedeğini kontrol et"); settle()
-        check("to-dos land in their lists", library.todos(in: TodoBucket.today).map(\.text) == ["faturaları gönder"]
-            && library.todos(in: TodoBucket.week).map(\.text) == ["sunucu yedeğini kontrol et"])
-        check("to-dos stay out of session tasks", library.pinned.allSatisfy { $0.tasks.allSatisfy { !$0.sessionID.isEmpty } })
-        library.move(library.todos(in: TodoBucket.week)[0], to: TodoBucket.today); settle()
-        check("to-do moved to today", library.todos(in: TodoBucket.today).count == 2 && library.todos(in: TodoBucket.week).isEmpty)
-        library.toggle(library.todos[0]); settle()
-        check("done to-do sorts last", library.todos.map(\.done) == [false, true])
-        for todo in library.todos { library.delete(todo) }
+        let today = library.today
+        let tomorrow = Format.dayKey(Date().addingTimeInterval(86_400))
+        let past = Format.dayKey(Date().addingTimeInterval(-3 * 86_400))
+        func task(_ text: String) -> TaskItem {
+            guard let found = library.tasks.first(where: { $0.text == text }) else {
+                print("FAIL task not found: \(text)")
+                exit(1)
+            }
+            return found
+        }
+        check("a new task goes to the selected day, which is today", library.selectedDay == today)
+        library.addTodo("faturaları gönder"); settle()
+        check("task lands on the selected day", library.tasks(on: today).map(\.text) == ["faturaları gönder"])
+        library.setDue(task("faturaları gönder"), to: tomorrow); settle()
+        check("setDue moves a task to another day",
+              library.tasks(on: tomorrow).map(\.text) == ["faturaları gönder"] && library.tasks(on: today).isEmpty)
+        library.selectedDay = past
+        library.addTodo("sözleşmeyi gözden geçir"); settle()
+        library.showToday()
+        check("a task with a past day is overdue", library.overdueTasks.map(\.text) == ["sözleşmeyi gözden geçir"])
+        check("an overdue task is not listed under today",
+              library.tasks(on: today).isEmpty && library.openTaskCount(on: today) == 0)
+        check("the calendar counts open tasks per day",
+              library.openTaskCount(on: tomorrow) == 1 && library.openTaskCount(on: past) == 1)
+        library.setDue(task("faturaları gönder"), to: nil); settle()
+        check("a task without a day is undated",
+              library.undatedTasks.map(\.text) == ["faturaları gönder"] && library.tasks(on: tomorrow).isEmpty)
+
+        check("the calendar week starts on Monday", library.calendarDays.count == 7
+            && Library.calendar.component(.weekday, from: library.calendarDays[0]) == 2
+            && library.calendarDays.contains { Format.dayKey($0) == today })
+        library.shiftCalendar(by: 1)
+        let nextWeek = Format.dayKey(Date().addingTimeInterval(7 * 86_400))
+        check("moving a week carries the selected day", library.selectedDay == nextWeek
+            && library.calendarDays.contains { Format.dayKey($0) == nextWeek })
+        library.calendarExpanded = true
+        check("a month is whole weeks around its days", library.calendarDays.count % 7 == 0
+            && library.calendarDays.contains { Format.dayKey($0) == nextWeek })
+        library.showToday()
+        check("showToday returns to today", library.selectedDay == today
+            && library.calendarDays.contains { Format.dayKey($0) == today })
+        library.calendarExpanded = false
+
+        library.beginTask(linkedTo: .session(id: session.id, title: session.title))
+        check("beginTask prepares the task field", library.taskLink == .session(id: session.id, title: session.title)
+            && library.showsTodos && !library.isCollapsed(PanelSection.todos) && library.todoFocusRequest == 1)
+        check("escape gives up the link and keeps the panel open",
+              library.handleEscape() == false && library.taskLink == nil)
+        library.beginTask(linkedTo: .session(id: session.id, title: session.title))
+        library.addTodo("oturum açma hatasını tekrar dene"); settle()
+        let sessionTask = task("oturum açma hatasını tekrar dene")
+        check("task linked to a session", sessionTask.sessionID == session.id && sessionTask.projectKey == nil)
+        check("the link is used by one task", library.taskLink == nil)
+        check("linkTitle names the session", library.linkTitle(for: sessionTask)?.title == session.title)
+        check("it shows under the pinned session, not as undated",
+              library.pinned[0].tasks.contains { $0.id == sessionTask.id }
+              && !library.undatedTasks.contains { $0.id == sessionTask.id })
+
+        guard let renamed = library.projects.first(where: { $0.key == first.key }),
+              let target = library.projects.first(where: { $0.key == second.key }) else {
+            print("FAIL projects went missing")
+            exit(1)
+        }
+        library.taskLink = .project(key: renamed.key, name: renamed.name)
+        library.addTodo("README'ye kurulum bölümü ekle"); settle()
+        var projectTask = task("README'ye kurulum bölümü ekle")
+        check("task linked to a project", projectTask.projectKey == renamed.key && projectTask.sessionID.isEmpty)
+        check("linkTitle names the project", library.linkTitle(for: projectTask)?.title == renamed.name)
+        library.link(projectTask, toProject: target.key); settle()
+        projectTask = task("README'ye kurulum bölümü ekle")
+        check("link moves a task to another project", projectTask.projectKey == target.key
+            && library.linkTitle(for: projectTask)?.title == target.name)
+
+        var started: (folder: String, prompt: String)?
+        library.onStartSession = { started = ($0, $1) }
+        library.run(projectTask)
+        let hasFolder = target.folders.contains { FileManager.default.fileExists(atPath: $0) }
+        check("run starts a session for a project's task",
+              started?.prompt == projectTask.text || (!hasFolder && library.notice == "Proje klasörü bulunamadı"))
+        library.onStartSession = nil
+
+        for item in library.tasks { library.delete(item) }
         settle()
-        check("to-dos deleted", library.todos.isEmpty)
+        check("tasks deleted", library.tasks.isEmpty && library.undatedTasks.isEmpty && library.overdueTasks.isEmpty)
 
         var announced: [LiveSession.State] = []
         library.finishThreshold = 0

@@ -184,7 +184,9 @@ enum Schema {
         done INTEGER NOT NULL DEFAULT 0,
         created REAL NOT NULL,
         done_at REAL,
-        bucket TEXT
+        bucket TEXT,
+        due TEXT,
+        project_key TEXT
     );
     CREATE TABLE IF NOT EXISTS project_names(key TEXT PRIMARY KEY, name TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS project_merges(key TEXT PRIMARY KEY, target TEXT NOT NULL);
@@ -221,6 +223,11 @@ extension Schema {
     /// Adds columns that later versions introduced to tables holding the user's own data.
     static func addColumns(_ db: Database) {
         _ = try? db.exec("ALTER TABLE tasks ADD COLUMN bucket TEXT")
+        _ = try? db.exec("ALTER TABLE tasks ADD COLUMN due TEXT")
+        _ = try? db.exec("ALTER TABLE tasks ADD COLUMN project_key TEXT")
+        // Version 0.4 filed to-dos under "today" or "this week"; they become dated or undated.
+        _ = try? db.run("UPDATE tasks SET due = ? WHERE bucket = 'today' AND due IS NULL", [Format.dayKey(Date())])
+        _ = try? db.exec("UPDATE tasks SET bucket = NULL WHERE bucket IS NOT NULL")
     }
 }
 

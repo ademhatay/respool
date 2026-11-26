@@ -88,6 +88,31 @@ enum Opener {
         return NSWorkspace.shared.open(url)
     }
 
+    /// Starts a new Claude Code session in a folder, with the given text as its first prompt
+    /// or with none to type when it is blank.
+    @discardableResult
+    static func startSession(in folder: String, prompt: String) -> Bool {
+        func quoted(_ text: String) -> String {
+            "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let argument = trimmed.isEmpty ? "" : " " + quoted(trimmed)
+        let script = """
+        #!/bin/zsh -l
+        cd \(quoted(folder))
+        exec claude\(argument)
+
+        """
+        let url = Paths.support.appendingPathComponent("start.command")
+        do {
+            try script.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        } catch {
+            return false
+        }
+        return NSWorkspace.shared.open(url)
+    }
+
     static func revealFolder(_ path: String) {
         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path)
     }

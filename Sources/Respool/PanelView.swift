@@ -9,6 +9,11 @@ enum PanelField: Hashable {
     case todo
 }
 
+/// Places in the panel's list that are scrolled to by name.
+enum ScrollAnchor: Hashable {
+    static let top = "top"
+}
+
 struct PanelView: View {
     @ObservedObject var library: Library
     let close: () -> Void
@@ -143,6 +148,7 @@ struct PanelView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
+                        Color.clear.frame(height: 0).id(ScrollAnchor.top)
                         if let results = library.results {
                             resultRows(results)
                         } else if let tagged = library.tagged {
@@ -157,6 +163,10 @@ struct PanelView: View {
                 .onChange(of: library.selection) { _, key in
                     guard let key else { return }
                     withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(key) }
+                }
+                .onChange(of: library.todoFocusRequest) { _, _ in
+                    proxy.scrollTo(ScrollAnchor.top, anchor: .top)
+                    DispatchQueue.main.async { focus = .todo }
                 }
             }
         }
@@ -503,6 +513,7 @@ struct SessionRow: View {
         Button("İstem dökümü") { library.showOutline(for: session) }
         Divider()
         Button(pinned ? "Sabitlemeyi kaldır" : "Sabitle") { library.togglePin(session) }
+        Button("Görev ekle") { library.beginTask(linkedTo: .session(id: session.id, title: session.title)) }
         Menu("Etiketler") {
             ForEach(library.tags) { tag in
                 Toggle(tag.name, isOn: Binding(
@@ -558,7 +569,7 @@ struct LiveIndicator: View {
 
 // MARK: - To-dos
 
-/// To-dos that belong to no session, split into today and this week.
+/// The to-do section: a calendar, then the tasks planned for the day it has selected.
 struct TodoSection: View {
     @ObservedObject var library: Library
     var focus: FocusState<PanelField?>.Binding
@@ -568,35 +579,44 @@ struct TodoSection: View {
     var body: some View {
         CollapsibleHeader(
             library: library, title: "Yapılacaklar",
-            section: PanelSection.todos, count: library.todos.filter { !$0.done }.count
+            section: PanelSection.todos, count: library.openListedTaskCount
         )
         if !library.isCollapsed(PanelSection.todos) {
+            TaskCalendar(library: library)
             lists
             addRow
         }
     }
 
     @ViewBuilder private var lists: some View {
-        ForEach([TodoBucket.today, TodoBucket.week], id: \.self) { bucket in
-            let items = library.todos(in: bucket)
-            if !items.isEmpty {
-                Text(TodoBucket.title(bucket))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 8)
-                    .padding(.top, bucket == TodoBucket.today ? 0 : 6)
-                    .padding(.bottom, 1)
-                ForEach(items) { todo in
-                    TaskRow(library: library, task: todo)
-                        .contextMenu {
-                            let other = bucket == TodoBucket.today ? TodoBucket.week : TodoBucket.today
-                            Button("\(TodoBucket.title(other)) listesine taşı") { library.move(todo, to: other) }
-                            Divider()
-                            Button("Sil", role: .destructive) { library.delete(todo) }
-                        }
-                }
+        let day = library.selectedDay
+        // Tasks whose day has passed are late wherever they are listed, so they only join today's.
+        let overdue = day == library.today ? library.overdueTasks : []
+        if !overdue.isEmpty {
+            groupTitle("Gecikmiş")
+            ForEach(overdue) { task in
+                TaskRow(library: library, task: task, listedDay: day)
             }
         }
+        ForEach(library.tasks(on: day)) { task in
+            TaskRow(library: library, task: task, listedDay: day)
+        }
+        let undated = library.undatedTasks
+        if !undated.isEmpty {
+            groupTitle("Tarihsiz")
+            ForEach(undated) { task in
+                TaskRow(library: library, task: task, listedDay: day)
+            }
+        }
+    }
+
+    private func groupTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+            .padding(.bottom, 1)
     }
 
     private var addRow: some View {
@@ -614,20 +634,184 @@ struct TodoSection: View {
                     draft = ""
                     DispatchQueue.main.async { focus.wrappedValue = .todo }
                 }
-            Menu {
-                Button(TodoBucket.title(TodoBucket.today)) { library.todoBucket = TodoBucket.today }
-                Button(TodoBucket.title(TodoBucket.week)) { library.todoBucket = TodoBucket.week }
-            } label: {
-                Text(TodoBucket.title(library.todoBucket))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+            if let link = library.taskLink {
+                linkChip(link)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("Yeni görevin ekleneceği liste")
+            // Says which day the calendar has selected, since that is where a new task goes.
+            Text(library.dayLabel(library.selectedDay))
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .fixedSize()
+                .help("Yeni görevler bu güne eklenir. Başka bir gün için takvimden gün seçin.")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+        .onAppear {
+            // The row was just created because a session or project asked for a task; take the focus.
+            guard library.taskLink != nil else { return }
+            DispatchQueue.main.async { focus.wrappedValue = .todo }
+        }
+    }
+
+    /// The session or project the next task will be attached to, with a way to take that back.
+    private func linkChip(_ link: TaskLink) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: link.symbol)
+                .font(.system(size: 9, weight: .medium))
+            Text(link.title)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 120)
+            Button {
+                library.taskLink = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 7, weight: .bold))
+                    .frame(width: 12, height: 12)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Bağlantıyı kaldır")
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .padding(.leading, 6)
+        .padding(.trailing, 3)
+        .frame(height: 20)
+        .background(Capsule().fill(Color.primary.opacity(0.07)))
+        .help("Görev buna bağlanacak: \(link.title)")
+    }
+}
+
+/// A week, or a whole month when expanded, with a mark under each day that has open tasks.
+struct TaskCalendar: View {
+    @ObservedObject var library: Library
+
+    @State private var hovering: Date?
+
+    /// Monday first, whatever day the calendar's own week starts on.
+    private static let weekdays: [String] = {
+        let symbols = Library.calendar.shortWeekdaySymbols
+        let start = Library.calendar.firstWeekday - 1
+        return Array(symbols[start...] + symbols[..<start])
+    }()
+
+    var body: some View {
+        let days = library.calendarDays
+        VStack(spacing: 3) {
+            header(days: days)
+            HStack(spacing: 0) {
+                ForEach(Self.weekdays, id: \.self) { name in
+                    Text(name)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            ForEach(Array(stride(from: 0, to: days.count, by: 7)), id: \.self) { start in
+                HStack(spacing: 0) {
+                    ForEach(days[start..<min(start + 7, days.count)], id: \.self) { day in
+                        cell(day)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 2)
+        .padding(.bottom, 6)
+    }
+
+    private func header(days: [Date]) -> some View {
+        let expanded = library.calendarExpanded
+        return HStack(spacing: 2) {
+            arrow("chevron.left", expanded ? "Önceki ay" : "Önceki hafta", step: -1)
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { library.calendarExpanded.toggle() }
+            } label: {
+                Text(title(days))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 7)
+                    .frame(height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(expanded ? "Hafta görünümüne geç" : "Ay görünümüne geç")
+            arrow("chevron.right", expanded ? "Sonraki ay" : "Sonraki hafta", step: 1)
+            Spacer(minLength: 4)
+            Button("Bugün") { withAnimation(.easeOut(duration: 0.15)) { library.showToday() } }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7)
+                .frame(height: 22)
+                .contentShape(Rectangle())
+                .help("Bugüne dön")
+                .opacity(library.selectedDay == library.today ? 0.5 : 1)
+        }
+    }
+
+    private func arrow(_ symbol: String, _ help: String, step: Int) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { library.shiftCalendar(by: step) }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func title(_ days: [Date]) -> String {
+        if library.calendarExpanded, let month = Library.calendar.dateInterval(of: .month, for: library.calendarAnchor) {
+            return Format.month(month.start)
+        }
+        if let first = days.first, let last = days.last { return Format.calendarTitle(from: first, to: last) }
+        return ""
+    }
+
+    private func cell(_ date: Date) -> some View {
+        let key = Format.dayKey(date)
+        let isToday = key == library.today
+        let isSelected = key == library.selectedDay
+        let inMonth = Library.calendar.isDate(date, equalTo: library.calendarAnchor, toGranularity: .month)
+        let ink: Color = isToday ? (isSelected ? .white : .accentColor) : (inMonth ? .primary : .secondary)
+        return Button {
+            withAnimation(.easeOut(duration: 0.12)) { library.selectedDay = key }
+        } label: {
+            VStack(spacing: 3) {
+                Text(String(Library.calendar.component(.day, from: date)))
+                    .font(.system(size: 12, weight: isToday || isSelected ? .semibold : .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(ink)
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle().fill(isSelected ? (isToday ? Color.accentColor : Color.primary.opacity(0.14)) : .clear)
+                    )
+                    .overlay(
+                        // Today is ringed even on a day that is not selected.
+                        Circle().strokeBorder(isToday && !isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
+                    )
+                Circle()
+                    .fill(library.openTaskCount(on: key) > 0 ? Color.accentColor : .clear)
+                    .frame(width: 4, height: 4)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 31)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(hovering == date && !isSelected ? 0.06 : 0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in hovering = inside ? date : (hovering == date ? nil : hovering) }
+        .help(Format.day(date))
     }
 }
 
@@ -648,7 +832,7 @@ struct PinnedCard: View {
                 onAddTask: startAdding
             )
             ForEach(item.tasks) { task in
-                TaskRow(library: library, task: task)
+                TaskRow(library: library, task: task, showsLink: false)
             }
             if library.addingTaskFor == item.id {
                 addField
@@ -698,11 +882,31 @@ struct PinnedCard: View {
     }
 }
 
+/// One task. Under a pinned session it shows its date; in the to-do list it also names the
+/// session or project it is attached to.
 struct TaskRow: View {
     @ObservedObject var library: Library
     let task: TaskItem
+    /// The day the list around this row is about. A task planned for another day says which.
+    var listedDay: String?
+    /// False under a pinned session, whose name is already on the line above.
+    var showsLink = true
 
     @State private var hovering = false
+
+    private var isOverdue: Bool {
+        !task.done && task.due.map { $0 < library.today } == true
+    }
+
+    private var link: (symbol: String, title: String)? {
+        showsLink ? library.linkTitle(for: task) : nil
+    }
+
+    /// The task's day, when it is not the day being listed.
+    private var dateLabel: String? {
+        guard let due = task.due, due != listedDay else { return nil }
+        return library.dayLabel(due)
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -717,13 +921,30 @@ struct TaskRow: View {
             .buttonStyle(.plain)
             .help(task.done ? "Yapılmadı olarak işaretle" : "Tamamlandı olarak işaretle")
 
-            Text(task.text)
-                .font(.system(size: 12))
-                .strikethrough(task.done)
-                .foregroundStyle(task.done ? AnyShapeStyle(HierarchicalShapeStyle.tertiary) : AnyShapeStyle(HierarchicalShapeStyle.primary))
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(task.text)
+                    .font(.system(size: 12))
+                    .strikethrough(task.done)
+                    .foregroundStyle(task.done ? AnyShapeStyle(HierarchicalShapeStyle.tertiary) : AnyShapeStyle(HierarchicalShapeStyle.primary))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                detail
+            }
             Spacer(minLength: 4)
+            if link != nil {
+                Button {
+                    library.run(task)
+                } label: {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Görevi Claude'da başlat")
+                .opacity(hovering ? 1 : 0)
+            }
             Button {
                 library.delete(task)
             } label: {
@@ -741,6 +962,69 @@ struct TaskRow: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .contextMenu { menu }
+    }
+
+    /// What the task is attached to, and when it is due when that is another day.
+    @ViewBuilder private var detail: some View {
+        if link != nil || dateLabel != nil {
+            HStack(spacing: 4) {
+                if let link {
+                    Image(systemName: link.symbol)
+                        .font(.system(size: 9, weight: .medium))
+                    Text(link.title)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if link != nil, dateLabel != nil {
+                    Text("·")
+                }
+                if let dateLabel {
+                    Text(dateLabel)
+                        .foregroundStyle(isOverdue ? Color.orange : Color.secondary)
+                        .fixedSize()
+                }
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder private var menu: some View {
+        Menu("Tarih") {
+            let tomorrow = Format.dayKey(Library.calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date())
+            Toggle("Bugün", isOn: isDue(library.today))
+            Toggle("Yarın", isOn: isDue(tomorrow))
+            // Today and tomorrow are above; the rest of what the calendar shows follows.
+            let upcoming = library.calendarDays.map(Format.dayKey).filter { $0 > tomorrow }
+            if !upcoming.isEmpty {
+                Divider()
+                ForEach(upcoming, id: \.self) { day in
+                    Toggle(library.dayLabel(day), isOn: isDue(day))
+                }
+            }
+            Divider()
+            Toggle("Tarihsiz", isOn: isDue(nil))
+        }
+        Menu("Projeye bağla") {
+            ForEach(library.projects) { project in
+                Button(project.name) { library.link(task, toProject: project.key) }
+            }
+            if !task.sessionID.isEmpty || task.projectKey != nil {
+                Divider()
+                Button("Bağlantıyı kaldır") { library.link(task, toProject: nil) }
+            }
+        }
+        Divider()
+        Button("Sil", role: .destructive) { library.delete(task) }
+    }
+
+    private func isDue(_ day: String?) -> Binding<Bool> {
+        Binding(
+            get: { task.due == day },
+            set: { _ in library.setDue(task, to: day) }
+        )
     }
 }
 
@@ -1578,6 +1862,7 @@ struct ProjectSection: View {
     }
 
     @ViewBuilder private var menu: some View {
+        Button("Görev ekle") { library.beginTask(linkedTo: .project(key: project.key, name: project.name)) }
         Button("Yeniden adlandır") { library.renamingProject = project.key }
         Menu("Şununla birleştir") {
             ForEach(library.projects.filter { $0.key != project.key }) { other in

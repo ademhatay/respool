@@ -79,16 +79,29 @@ struct TaskItem: Identifiable, Hashable {
     var text: String
     var done: Bool
     var doneAt: Date?
-    /// For a to-do that belongs to no session: "today" or "week".
-    var bucket: String?
+    /// The day the task is planned for, as `yyyy-MM-dd`; nil when it has no date.
+    var due: String?
+    /// The project the task belongs to, when it is linked to one rather than to a session.
+    var projectKey: String?
 }
 
-enum TodoBucket {
-    static let today = "today"
-    static let week = "week"
+/// What a new task will be attached to.
+enum TaskLink: Hashable {
+    case session(id: String, title: String)
+    case project(key: String, name: String)
 
-    static func title(_ bucket: String) -> String {
-        bucket == week ? "Bu hafta" : "Bugün"
+    var title: String {
+        switch self {
+        case .session(_, let title): return title
+        case .project(_, let name): return name
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .session: return "bubble.left"
+        case .project: return "folder"
+        }
     }
 }
 
@@ -242,6 +255,66 @@ enum Format {
 
     static func day(_ date: Date) -> String {
         dayFormatter.string(from: date)
+    }
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    /// The local calendar day as `yyyy-MM-dd`, which sorts in date order.
+    static func dayKey(_ date: Date) -> String {
+        dayKeyFormatter.string(from: date)
+    }
+
+    static func date(fromDayKey key: String) -> Date? {
+        dayKeyFormatter.date(from: key)
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.dateFormat = "LLLL yyyy"
+        return formatter
+    }()
+
+    private static let shortDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.dateFormat = "EEE d MMM"
+        return formatter
+    }()
+
+    static func month(_ date: Date) -> String {
+        monthFormatter.string(from: date).capitalized(with: Locale(identifier: "tr_TR"))
+    }
+
+    /// A day as "Pzt 30 Kas".
+    static func shortDay(_ date: Date) -> String {
+        shortDayFormatter.string(from: date)
+    }
+
+    private static let monthNameFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.dateFormat = "LLLL"
+        return formatter
+    }()
+
+    private static func monthName(_ date: Date) -> String {
+        monthNameFormatter.string(from: date)
+    }
+
+    /// What to call the days a calendar shows: one month, or both when a week crosses into another.
+    static func calendarTitle(from first: Date, to last: Date) -> String {
+        let calendar = Calendar(identifier: .gregorian)
+        let head = calendar.dateComponents([.year, .month], from: first)
+        let tail = calendar.dateComponents([.year, .month], from: last)
+        if head == tail { return month(first) }
+        if head.year == tail.year { return monthName(first) + " – " + month(last) }
+        return month(first) + " – " + month(last)
     }
 
     static func time(_ date: Date?) -> String {

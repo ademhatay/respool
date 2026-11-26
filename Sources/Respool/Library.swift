@@ -22,8 +22,19 @@ final class Library: ObservableObject {
     @Published private(set) var notice: String?
     @Published private(set) var live: [String: LiveSession] = [:]
     @Published private(set) var tags: [Tag] = []
-    /// To-dos that belong to no session, in the order they were added.
-    @Published private(set) var todos: [TaskItem] = []
+    /// Every task that is open or was finished in the last day, in the order they were added.
+    @Published private(set) var tasks: [TaskItem] = []
+    /// The day whose tasks are listed, as a day key.
+    @Published var selectedDay = Format.dayKey(Date())
+    /// A day inside the week or month the calendar is showing.
+    @Published var calendarAnchor = Date()
+    /// False shows the anchor's week, true its whole month.
+    @Published var calendarExpanded = UserDefaults.standard.bool(forKey: "calendarExpanded") {
+        didSet { UserDefaults.standard.set(calendarExpanded, forKey: "calendarExpanded") }
+    }
+    /// What the next task typed into the list will be attached to.
+    @Published var taskLink: TaskLink?
+    @Published var todoFocusRequest = 0
     /// Sessions that are waiting for the user, or finished while the user was not looking.
     @Published private(set) var attention: Set<String> = []
     @Published private(set) var organizations: [Organization] = []
@@ -58,7 +69,6 @@ final class Library: ObservableObject {
     @Published private(set) var collapsedSections: Set<String> {
         didSet { UserDefaults.standard.set(Array(collapsedSections), forKey: "collapsedSections") }
     }
-    @Published var todoBucket = TodoBucket.today
     @Published var showsTodos: Bool {
         didSet { UserDefaults.standard.set(showsTodos, forKey: "showsTodos") }
     }
@@ -92,6 +102,8 @@ final class Library: ObservableObject {
     var searchFocused = true
     var onOpen: ((SessionRecord) -> Void)?
     var onOpenInDesktop: ((SessionRecord) -> Void)?
+    /// Called with a folder and a first prompt to start a new session.
+    var onStartSession: ((String, String) -> Void)?
     /// Called when a session starts waiting or finishes its work.
     var onAttention: ((String, SessionRecord?, LiveSession) -> Void)?
     /// How long a session must have worked before its finishing is worth announcing.
@@ -138,7 +150,7 @@ final class Library: ObservableObject {
         var desktop = DesktopSessions.Index()
         var live: [String: LiveSession] = [:]
         var tags: [Tag] = []
-        var todos: [TaskItem] = []
+        var tasks: [TaskItem] = []
         var organizations: [Organization] = []
         var tagged: [SessionRecord]?
     }
@@ -165,7 +177,7 @@ final class Library: ObservableObject {
         desktop = snapshot.desktop
         ingestLive(snapshot.live)
         tags = snapshot.tags
-        todos = snapshot.todos
+        tasks = snapshot.tasks
         organizations = snapshot.organizations
         tagged = snapshot.tagged
         if let tagFilter, !snapshot.tags.contains(where: { $0.id == tagFilter }) { self.tagFilter = nil }
@@ -338,19 +350,16 @@ final class Library: ObservableObject {
         var tasksBySession: [String: [TaskItem]] = [:]
         let cutoff = Date().addingTimeInterval(-86_400).timeIntervalSince1970
         try? readDB.query(
-            "SELECT id, session_id, text, done, done_at, bucket FROM tasks WHERE done = 0 OR done_at > ? ORDER BY done, id",
+            "SELECT id, session_id, text, done, done_at, due, project_key FROM tasks WHERE done = 0 OR done_at > ? ORDER BY done, id",
             [cutoff]
         ) { row in
             guard let sessionID = row.text(1), let text = row.text(2) else { return }
             let task = TaskItem(
                 id: Int64(row.int(0)), sessionID: sessionID, text: text, done: row.int(3) == 1,
-                doneAt: row.date(4), bucket: row.text(5)
+                doneAt: row.date(4), due: row.text(5), projectKey: row.text(6)
             )
-            if sessionID.isEmpty {
-                snapshot.todos.append(task)
-            } else {
-                tasksBySession[sessionID, default: []].append(task)
-            }
+            snapshot.tasks.append(task)
+            if !sessionID.isEmpty { tasksBySession[sessionID, default: []].append(task) }
         }
         var pinnedIDs: [String] = []
         try? readDB.query("SELECT session_id FROM pins ORDER BY position") { row in
@@ -579,6 +588,12 @@ final class Library: ObservableObject {
             focusRequest += 1
             return false
         }
+        if taskLink != nil {
+            // Leaving the task field without adding a task gives up the link.
+            taskLink = nil
+            focusRequest += 1
+            return false
+        }
         if !searchFocused {
             // Escape in any other field goes back to the search field first.
             focusRequest += 1
@@ -594,6 +609,9 @@ final class Library: ObservableObject {
     func panelDidOpen() {
         selection = nil
         hover = nil
+        selectedDay = Format.dayKey(Date())
+        calendarAnchor = Date()
+        taskLink = nil
         // Opening the panel counts as seeing what finished; sessions still waiting stay marked.
         attention = attention.filter { live[$0]?.state == .waiting }
         addingTaskFor = nil
@@ -783,26 +801,164 @@ final class Library: ObservableObject {
         allSessions[id]
     }
 
-    // MARK: - To-dos
+    // MARK: - Tasks and calendar
 
+    var today: String {
+        Format.dayKey(Date())
+    }
+
+    func tasks(on day: String) -> [TaskItem] {
+        tasks.filter { $0.due == day }
+    }
+
+    /// Open tasks whose day has passed, the longest overdue first. They are listed with today's.
+    var overdueTasks: [TaskItem] {
+        let today = today
+        return tasks
+            .filter { !$0.done && ($0.due.map { $0 < today } ?? false) }
+            .sorted { ($0.due ?? "", $0.id) < ($1.due ?? "", $1.id) }
+    }
+
+    /// Tasks with no date. Those that belong to a pinned session are left out, because they
+    /// already show under that session.
+    var undatedTasks: [TaskItem] {
+        let pinnedIDs = Set(pinned.map(\.id))
+        return tasks.filter { $0.due == nil && !pinnedIDs.contains($0.sessionID) }
+    }
+
+    /// How many open tasks the to-do section lists, for its title when it is collapsed.
+    var openListedTaskCount: Int {
+        let pinnedIDs = Set(pinned.map(\.id))
+        return tasks.filter { !$0.done && ($0.due != nil || !pinnedIDs.contains($0.sessionID)) }.count
+    }
+
+    func openTaskCount(on day: String) -> Int {
+        tasks.reduce(0) { $0 + (!$1.done && $1.due == day ? 1 : 0) }
+    }
+
+    /// A day as "Bugün", "Yarın" or "Per 26 Kas".
+    func dayLabel(_ key: String) -> String {
+        let calendar = Self.calendar
+        if key == today { return "Bugün" }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: Date()), key == Format.dayKey(tomorrow) {
+            return "Yarın"
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: Date()), key == Format.dayKey(yesterday) {
+            return "Dün"
+        }
+        return Format.date(fromDayKey: key).map(Format.shortDay) ?? key
+    }
+
+    /// Adds a task for the selected day, attached to whatever `taskLink` names.
     func addTodo(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let bucket = todoBucket
+        let day = selectedDay
+        var sessionID = ""
+        var projectKey: String?
+        switch taskLink {
+        case .session(let id, _): sessionID = id
+        case .project(let key, _): projectKey = key
+        case nil: break
+        }
+        taskLink = nil
         write { db in
             try db.run(
-                "INSERT INTO tasks(session_id, text, done, created, bucket) VALUES('', ?, 0, ?, ?)",
-                [trimmed, Date().timeIntervalSince1970, bucket]
+                "INSERT INTO tasks(session_id, text, done, created, due, project_key) VALUES(?, ?, 0, ?, ?, ?)",
+                [sessionID, trimmed, Date().timeIntervalSince1970, day, projectKey]
             )
         }
     }
 
-    func move(_ todo: TaskItem, to bucket: String) {
-        write { db in try db.run("UPDATE tasks SET bucket = ? WHERE id = ?", [bucket, todo.id]) }
+    func setDue(_ task: TaskItem, to day: String?) {
+        write { db in try db.run("UPDATE tasks SET due = ? WHERE id = ?", [day, task.id]) }
     }
 
-    func todos(in bucket: String) -> [TaskItem] {
-        todos.filter { ($0.bucket ?? TodoBucket.today) == bucket }
+    func link(_ task: TaskItem, toProject key: String?) {
+        write { db in
+            try db.run("UPDATE tasks SET project_key = ?, session_id = '' WHERE id = ?", [key, task.id])
+        }
+    }
+
+    /// Starts typing a task that will be attached to a session or project. Search results and a
+    /// tag view give way to the task list, since that is where the field is.
+    func beginTask(linkedTo link: TaskLink) {
+        taskLink = link
+        query = ""
+        tagFilter = nil
+        showsTodos = true
+        collapsedSections.remove(PanelSection.todos)
+        todoFocusRequest += 1
+    }
+
+    /// The session or project a task is attached to, if it can still be found.
+    func linkTitle(for task: TaskItem) -> (symbol: String, title: String)? {
+        if !task.sessionID.isEmpty, let session = allSessions[task.sessionID] {
+            return ("bubble.left", session.title)
+        }
+        if let key = task.projectKey, let project = projects.first(where: { $0.key == key }) {
+            return ("folder", project.name)
+        }
+        return nil
+    }
+
+    /// Takes a linked task to Claude: opens its session with the task on the clipboard, or
+    /// starts a new session in its project with the task as the first prompt.
+    func run(_ task: TaskItem) {
+        if !task.sessionID.isEmpty, let session = allSessions[task.sessionID] {
+            Opener.copy(task.text)
+            show(notice: "Görev panoya kopyalandı")
+            open(session)
+        } else if let key = task.projectKey, let project = projects.first(where: { $0.key == key }) {
+            let folder = project.folders.first { FileManager.default.fileExists(atPath: $0) }
+            guard let folder else {
+                show(notice: "Proje klasörü bulunamadı")
+                return
+            }
+            onStartSession?(folder, task.text)
+        }
+    }
+
+    // MARK: - Calendar
+
+    static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "tr_TR")
+        calendar.firstWeekday = 2
+        return calendar
+    }()
+
+    /// The days the calendar shows: the anchor's week, or every week touching its month.
+    var calendarDays: [Date] {
+        let calendar = Self.calendar
+        func weekStart(_ date: Date) -> Date {
+            calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
+        }
+        guard calendarExpanded, let month = calendar.dateInterval(of: .month, for: calendarAnchor) else {
+            let start = weekStart(calendarAnchor)
+            return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+        }
+        let start = weekStart(month.start)
+        let lastDay = calendar.date(byAdding: .day, value: -1, to: month.end) ?? month.start
+        let end = calendar.date(byAdding: .day, value: 7, to: weekStart(lastDay)) ?? month.end
+        let count = calendar.dateComponents([.day], from: start, to: end).day ?? 7
+        return (0..<count).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+    }
+
+    /// Moves the calendar a week or a month. The selected day moves by the same amount, so the
+    /// list under the calendar keeps describing a day that is on screen.
+    func shiftCalendar(by step: Int) {
+        let unit: Calendar.Component = calendarExpanded ? .month : .weekOfYear
+        calendarAnchor = Self.calendar.date(byAdding: unit, value: step, to: calendarAnchor) ?? calendarAnchor
+        if let day = Format.date(fromDayKey: selectedDay),
+           let moved = Self.calendar.date(byAdding: unit, value: step, to: day) {
+            selectedDay = Format.dayKey(moved)
+        }
+    }
+
+    func showToday() {
+        calendarAnchor = Date()
+        selectedDay = today
     }
 
     // MARK: - Activity

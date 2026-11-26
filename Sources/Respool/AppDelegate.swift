@@ -57,6 +57,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 library.show(notice: "Sohbet Claude'da açılamadı")
             }
         }
+        library.onStartSession = { [weak controller, weak library] folder, prompt in
+            controller?.hide()
+            guard Opener.startSession(in: folder, prompt: prompt) else {
+                controller?.show()
+                library?.show(notice: "Oturum başlatılamadı")
+                return
+            }
+        }
         self.library = library
         self.controller = controller
 
