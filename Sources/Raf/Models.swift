@@ -14,6 +14,12 @@ struct SessionRecord: Identifiable, Hashable {
     var messageCount: Int
     var projectKey: String = ""
     var projectName: String = ""
+    var tagIDs: [Int64] = []
+    /// The organization the desktop app filed this session under; nil for terminal-only sessions.
+    var organizationID: String?
+    var organizationName: String?
+    /// True when the session's organization is not the one the desktop app is signed in to.
+    var inOtherOrganization = false
 
     var title: String {
         if let customTitle, !customTitle.isEmpty { return customTitle }
@@ -28,6 +34,35 @@ struct SessionRecord: Identifiable, Hashable {
     var hasCustomTitle: Bool {
         !(customTitle ?? "").isEmpty
     }
+
+    /// The project, plus the organization when the session lives in one that is not open.
+    var placeLabel: String {
+        guard inOtherOrganization, let organizationName else { return projectName }
+        return "\(projectName) · \(organizationName)"
+    }
+}
+
+struct Tag: Identifiable, Hashable {
+    let id: Int64
+    var name: String
+    /// Index into `TagPalette.colors`.
+    var color: Int
+}
+
+struct Organization: Identifiable, Hashable {
+    let id: String
+    var name: String
+    var isCurrent: Bool
+    var sessionCount: Int
+}
+
+/// The tag being created or renamed in the panel.
+struct TagEditor: Hashable {
+    var tagID: Int64?
+    /// A session to tag as soon as the new tag is created.
+    var sessionID: String?
+    var name = ""
+    var color = 4
 }
 
 struct TaskItem: Identifiable, Hashable {
@@ -75,6 +110,7 @@ enum RowKey {
     static func recent(_ id: String) -> String { "recent:" + id }
     static func project(_ id: String) -> String { "project:" + id }
     static func hit(_ id: String) -> String { "hit:" + id }
+    static func tagged(_ id: String) -> String { "tagged:" + id }
 
     static func sessionID(_ key: String) -> String {
         key.split(separator: ":", maxSplits: 1).last.map(String.init) ?? key

@@ -9,6 +9,11 @@ sohbetleri tek yerde gösterir, içlerinde arar ve tıklayınca sohbeti bulundu�
 - **Projeler.** Aynı deponun farklı klasörlerdeki kopyalarını tek proje altında toplar
   (git remote adresine göre). Projeleri elle birleştirebilir ve yeniden adlandırabilirsiniz.
 - **Sabitleme ve görevler.** Sık döndüğünüz sohbetleri sabitleyin; her birine yapılacaklar ekleyin.
+- **Etiketler.** Sohbetlere renkli etiket verin; aramanın altındaki etikete tıklayınca yalnızca
+  o etiketteki sohbetler listelenir.
+- **Hesaplar.** Birden fazla organizasyonunuz varsa üstteki seçiciyle listeyi birine daraltın.
+  Claude uygulamasının o an açık olmayan organizasyonundaki bir sohbet oradan açılamaz;
+  Raf bunu söyler, hesabı Claude'da siz değiştirirsiniz.
 - **Canlı durum.** Açık sohbetlerde Claude çalışıyorsa bir gösterge, sıra sizdeyse bir nokta görünür.
 - **Açma.** Claude uygulamasındaki sohbet orada açılır. Terminalde açık olan sohbetin terminali
   öne gelir. Kapalı bir terminal sohbeti yeni bir terminalde sürdürülür.

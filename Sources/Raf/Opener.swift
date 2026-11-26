@@ -120,6 +120,21 @@ enum Opener {
     }
 }
 
+/// The organization Claude Code is signed in to, which is the only place its name is written down.
+enum ClaudeAccount {
+    static func organization() -> (id: String, name: String)? {
+        let url = Paths.home.appendingPathComponent(".claude.json")
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let account = object["oauthAccount"] as? [String: Any],
+              let id = account["organizationUuid"] as? String,
+              let name = account["organizationName"] as? String, !name.isEmpty else { return nil }
+        // A personal plan is stored as "<email>'s Organization"; show that as a plain label instead.
+        if name.hasSuffix("'s Organization") || name.hasSuffix("’s Organization") { return (id, "Kişisel") }
+        return (id, name)
+    }
+}
+
 /// Reads which sessions the Claude desktop app already tracks, so they can be opened by link.
 enum DesktopSessions {
     private static let root = Paths.home

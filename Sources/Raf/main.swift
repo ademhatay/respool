@@ -48,6 +48,17 @@ if let output = value(after: "--snapshot") {
     do {
         let library = try Library()
         library.reloadSync()
+        if arguments.contains("--seed-tags"), ProcessInfo.processInfo.environment["RAF_DB"] != nil {
+            // Writes sample tags, so it only runs against a throwaway index.
+            let samples = [("acil", 0), ("müşteri", 4), ("araştırma", 5)]
+            for (offset, sample) in samples.enumerated() where offset < library.recent.count {
+                library.tagEditor = TagEditor(sessionID: library.recent[offset].id, name: sample.0, color: sample.1)
+                library.commitTagEditor()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            }
+            if arguments.contains("--filter-tag") { library.tagFilter = library.tags.first?.id }
+            library.reloadSync()
+        }
         if arguments.contains("--preview-pins") { library.applyPreviewPins() }
         if let expand = value(after: "--expand") {
             library.expanded = Set(library.projects.filter { $0.name == expand }.map(\.key))
@@ -117,6 +128,35 @@ if arguments.contains("--selftest") {
         check("rename", library.projects.first { $0.key == first.key }?.name == "Yeni Ad")
         library.separate(library.projects.first { $0.key == first.key }!); settle()
         check("separate restores project", library.projects.contains { $0.key == second.key })
+
+        library.tagEditor = TagEditor(sessionID: session.id, name: "acil", color: 0)
+        library.commitTagEditor(); settle()
+        check("tag created", library.tags.map(\.name) == ["acil"])
+        check("tag applied to session", library.pinned.first?.session.tagIDs == library.tags.map(\.id))
+        let tag = library.tags[0]
+        library.tagFilter = tag.id; settle()
+        check("tag filter lists the session", library.tagged?.map(\.id) == [session.id])
+        library.tagEditor = TagEditor(tagID: tag.id, name: "önemli", color: 3)
+        library.commitTagEditor(); settle()
+        check("tag renamed and recolored", library.tags.first?.name == "önemli" && library.tags.first?.color == 3)
+        library.toggle(library.tags[0], on: library.pinned[0].session); settle()
+        check("tag removed from session", library.tagged?.isEmpty == true)
+        library.delete(library.tags[0]); settle()
+        check("tag deleted clears filter", library.tags.isEmpty && library.tagFilter == nil && library.tagged == nil)
+
+        if let organization = library.organizations.last, library.organizations.count > 1 {
+            let everything = library.sessionCount
+            library.organizationFilter = organization.id; settle()
+            check("organization filter narrows the list", library.sessionCount < everything && library.sessionCount > 0)
+            let foreign = library.projects.flatMap(\.sessions).contains {
+                $0.organizationID != nil && $0.organizationID != organization.id
+            }
+            check("no session from another organization", !foreign)
+            library.rename(organization, to: "Takım"); settle()
+            check("organization renamed", library.organizations.contains { $0.name == "Takım" })
+            library.organizationFilter = nil; settle()
+            check("filter cleared", library.sessionCount == everything)
+        }
 
         library.togglePin(session); settle()
         check("unpin", library.pinned.isEmpty)

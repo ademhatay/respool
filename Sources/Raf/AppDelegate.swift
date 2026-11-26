@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         library.onOpen = { [weak controller, weak library] session in
             guard let library else { return }
             if library.isInOtherOrganization(session.id) {
-                library.show(notice: "Diğer hesapta: Claude'da hesabı değiştirin")
+                library.show(notice: "\(session.organizationName ?? "Diğer hesap") hesabında. Claude'da hesabı değiştirin.")
                 return
             }
             controller?.hide()
@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             if library.isInOtherOrganization(session.id) {
-                library.show(notice: "Diğer hesapta: Claude'da hesabı değiştirin")
+                library.show(notice: "\(session.organizationName ?? "Diğer hesap") hesabında. Claude'da hesabı değiştirin.")
                 return
             }
             controller?.hide()

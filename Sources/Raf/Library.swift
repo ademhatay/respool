@@ -20,11 +20,28 @@ final class Library: ObservableObject {
     @Published private(set) var hasLoaded = false
     @Published private(set) var notice: String?
     @Published private(set) var live: [String: LiveSession] = [:]
+    @Published private(set) var tags: [Tag] = []
+    @Published private(set) var organizations: [Organization] = []
+    /// Sessions carrying the selected tag, newest first; nil when no tag is selected.
+    @Published private(set) var tagged: [SessionRecord]?
 
     @Published var query = "" {
         didSet { if query != oldValue { scheduleSearch() } }
     }
     @Published var selection: String?
+    /// Show only one organization's sessions. Terminal-only sessions have none and always show.
+    @Published var organizationFilter: String? {
+        didSet {
+            guard organizationFilter != oldValue else { return }
+            UserDefaults.standard.set(organizationFilter, forKey: "organizationFilter")
+            reload()
+        }
+    }
+    @Published var tagFilter: Int64? {
+        didSet { if tagFilter != oldValue { reload() } }
+    }
+    @Published var tagEditor: TagEditor?
+    @Published var editingOrganizations = false
     @Published var expanded: Set<String> {
         didSet { UserDefaults.standard.set(Array(expanded), forKey: "expandedProjects") }
     }
@@ -59,6 +76,7 @@ final class Library: ObservableObject {
         readDB = try Database(path: Paths.database)
         userDB = try Database(path: Paths.database)
         expanded = Set(UserDefaults.standard.stringArray(forKey: "expandedProjects") ?? [])
+        organizationFilter = UserDefaults.standard.string(forKey: "organizationFilter")
     }
 
     // MARK: - Loading
@@ -70,24 +88,39 @@ final class Library: ObservableObject {
         var projects: [ProjectGroup] = []
         var desktop = DesktopSessions.Index()
         var live: [String: LiveSession] = [:]
+        var tags: [Tag] = []
+        var organizations: [Organization] = []
+        var tagged: [SessionRecord]?
     }
 
     func reload() {
+        let organization = organizationFilter, tag = tagFilter
         readQueue.async { [weak self] in
             guard let self else { return }
-            let snapshot = self.buildSnapshot()
-            DispatchQueue.main.async { self.apply(snapshot) }
+            let snapshot = self.buildSnapshot(organization: organization, tag: tag)
+            DispatchQueue.main.async {
+                // A filter changed while this was loading; a newer reload is already on its way.
+                guard organization == self.organizationFilter, tag == self.tagFilter else { return }
+                self.apply(snapshot)
+            }
         }
     }
 
     func reloadSync() {
-        apply(buildSnapshot())
+        apply(buildSnapshot(organization: organizationFilter, tag: tagFilter))
     }
 
     private func apply(_ snapshot: Snapshot) {
         allSessions = snapshot.sessions
         desktop = snapshot.desktop
         live = snapshot.live
+        tags = snapshot.tags
+        organizations = snapshot.organizations
+        tagged = snapshot.tagged
+        if let tagFilter, !snapshot.tags.contains(where: { $0.id == tagFilter }) { self.tagFilter = nil }
+        if let organizationFilter, !snapshot.organizations.contains(where: { $0.id == organizationFilter }) {
+            self.organizationFilter = nil
+        }
         pinned = snapshot.pinned
         recent = snapshot.recent
         projects = snapshot.projects
@@ -96,7 +129,7 @@ final class Library: ObservableObject {
         if results != nil { scheduleSearch(immediately: true) }
     }
 
-    private func buildSnapshot() -> Snapshot {
+    private func buildSnapshot(organization organizationFilter: String?, tag tagFilter: Int64?) -> Snapshot {
         var identities: [String: (key: String, name: String)] = [:]
         try? readDB.query("SELECT cwd, key, name FROM cwd_projects") { row in
             if let cwd = row.text(0), let key = row.text(1), let name = row.text(2) {
@@ -173,6 +206,56 @@ final class Library: ObservableObject {
         var snapshot = Snapshot()
         snapshot.desktop = DesktopSessions.load()
         snapshot.live = LiveSessions.load()
+
+        // Organizations: which one each session was filed under, and what to call them.
+        var customOrganizationNames: [String: String] = [:]
+        try? readDB.query("SELECT id, name FROM organization_names") { row in
+            if let id = row.text(0), let name = row.text(1) { customOrganizationNames[id] = name }
+        }
+        let signedIn = ClaudeAccount.organization()
+        let currentOrganization = snapshot.desktop.currentOrganization
+        var organizationCounts: [String: Int] = [:]
+        for index in ordered.indices {
+            guard let record = snapshot.desktop.records[ordered[index].id] else { continue }
+            ordered[index].organizationID = record.organization
+            organizationCounts[record.organization, default: 0] += 1
+        }
+        let organizationIDs = organizationCounts.keys.sorted { first, second in
+            if (first == currentOrganization) != (second == currentOrganization) { return first == currentOrganization }
+            return (organizationCounts[first] ?? 0) > (organizationCounts[second] ?? 0)
+        }
+        snapshot.organizations = organizationIDs.enumerated().map { position, id in
+            let fallback = signedIn?.id == id ? signedIn!.name : "Hesap \(position + 1)"
+            return Organization(
+                id: id, name: customOrganizationNames[id] ?? fallback,
+                isCurrent: id == currentOrganization, sessionCount: organizationCounts[id] ?? 0
+            )
+        }
+        let organizationNames = Dictionary(uniqueKeysWithValues: snapshot.organizations.map { ($0.id, $0.name) })
+        for index in ordered.indices {
+            guard let id = ordered[index].organizationID else { continue }
+            ordered[index].organizationName = organizationNames[id]
+            ordered[index].inOtherOrganization = currentOrganization != nil && id != currentOrganization
+                && snapshot.live[ordered[index].id] == nil
+        }
+        if let organizationFilter, organizationCounts[organizationFilter] != nil {
+            ordered = ordered.filter { $0.organizationID == nil || $0.organizationID == organizationFilter }
+        }
+
+        // Tags.
+        try? readDB.query("SELECT id, name, color FROM tags ORDER BY name COLLATE NOCASE") { row in
+            if let name = row.text(1) { snapshot.tags.append(Tag(id: Int64(row.int(0)), name: name, color: row.int(2))) }
+        }
+        var tagsBySession: [String: [Int64]] = [:]
+        try? readDB.query("SELECT session_id, tag_id FROM session_tags ORDER BY tag_id") { row in
+            if let id = row.text(0) { tagsBySession[id, default: []].append(Int64(row.int(1))) }
+        }
+        for index in ordered.indices {
+            ordered[index].tagIDs = tagsBySession[ordered[index].id] ?? []
+        }
+        if let tagFilter, snapshot.tags.contains(where: { $0.id == tagFilter }) {
+            snapshot.tagged = ordered.filter { $0.tagIDs.contains(tagFilter) }
+        }
         snapshot.sessions = Dictionary(uniqueKeysWithValues: ordered.map { ($0.id, $0) })
 
         var mergedInto: [String: [String]] = [:]
@@ -345,6 +428,7 @@ final class Library: ObservableObject {
 
     private var visibleKeys: [String] {
         if let results { return results.map { RowKey.hit($0.id) } }
+        if let tagged { return tagged.map { RowKey.tagged($0.id) } }
         var keys = pinned.map { RowKey.pin($0.id) } + recent.map { RowKey.recent($0.id) }
         for project in projects where expanded.contains(project.key) {
             keys += visibleSessions(in: project).map { RowKey.project($0.id) }
@@ -408,6 +492,12 @@ final class Library: ObservableObject {
             focusRequest += 1
             return false
         }
+        if tagEditor != nil || editingOrganizations {
+            tagEditor = nil
+            editingOrganizations = false
+            focusRequest += 1
+            return false
+        }
         if addingTaskFor != nil {
             addingTaskFor = nil
             focusRequest += 1
@@ -424,6 +514,8 @@ final class Library: ObservableObject {
         selection = nil
         addingTaskFor = nil
         renamingProject = nil
+        tagEditor = nil
+        editingOrganizations = false
         focusRequest += 1
         refresh()
     }
@@ -485,6 +577,72 @@ final class Library: ObservableObject {
 
     func delete(_ task: TaskItem) {
         write { db in try db.run("DELETE FROM tasks WHERE id = ?", [task.id]) }
+    }
+
+    // MARK: - Tags
+
+    func tags(for session: SessionRecord) -> [Tag] {
+        guard !session.tagIDs.isEmpty else { return [] }
+        return tags.filter { session.tagIDs.contains($0.id) }
+    }
+
+    func toggle(_ tag: Tag, on session: SessionRecord) {
+        let has = session.tagIDs.contains(tag.id)
+        write { db in
+            if has {
+                try db.run("DELETE FROM session_tags WHERE session_id = ? AND tag_id = ?", [session.id, tag.id])
+            } else {
+                try db.run("INSERT OR IGNORE INTO session_tags(session_id, tag_id) VALUES(?, ?)", [session.id, tag.id])
+            }
+        }
+    }
+
+    /// Saves the tag in the editor: renames an existing tag, or creates one and applies it.
+    func commitTagEditor() {
+        guard let editor = tagEditor else { return }
+        let name = editor.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        tagEditor = nil
+        focusRequest += 1
+        guard !name.isEmpty else { return }
+        write { db in
+            if let id = editor.tagID {
+                try db.run("UPDATE tags SET name = ?, color = ? WHERE id = ?", [name, editor.color, id])
+            } else {
+                try db.run("INSERT OR IGNORE INTO tags(name, color) VALUES(?, ?)", [name, editor.color])
+                if let sessionID = editor.sessionID {
+                    try db.run(
+                        "INSERT OR IGNORE INTO session_tags(session_id, tag_id) SELECT ?, id FROM tags WHERE name = ?",
+                        [sessionID, name]
+                    )
+                }
+            }
+        }
+    }
+
+    func recolor(_ tag: Tag, to color: Int) {
+        write { db in try db.run("UPDATE tags SET color = ? WHERE id = ?", [color, tag.id]) }
+    }
+
+    func delete(_ tag: Tag) {
+        if tagFilter == tag.id { tagFilter = nil }
+        write { db in
+            try db.run("DELETE FROM session_tags WHERE tag_id = ?", [tag.id])
+            try db.run("DELETE FROM tags WHERE id = ?", [tag.id])
+        }
+    }
+
+    // MARK: - Organizations
+
+    func rename(_ organization: Organization, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != organization.name else { return }
+        write { db in
+            if trimmed.isEmpty {
+                try db.run("DELETE FROM organization_names WHERE id = ?", [organization.id])
+            } else {
+                try db.run("INSERT OR REPLACE INTO organization_names(id, name) VALUES(?, ?)", [organization.id, trimmed])
+            }
+        }
     }
 
     // MARK: - Projects

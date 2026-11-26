@@ -182,6 +182,15 @@ enum Schema {
     );
     CREATE TABLE IF NOT EXISTS project_names(key TEXT PRIMARY KEY, name TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS project_merges(key TEXT PRIMARY KEY, target TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS tags(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        color INTEGER NOT NULL DEFAULT 4
+    );
+    CREATE TABLE IF NOT EXISTS session_tags(
+        session_id TEXT NOT NULL, tag_id INTEGER NOT NULL, PRIMARY KEY(session_id, tag_id)
+    );
+    CREATE TABLE IF NOT EXISTS organization_names(id TEXT PRIMARY KEY, name TEXT NOT NULL);
     """
 }
 

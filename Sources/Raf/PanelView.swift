@@ -4,6 +4,8 @@ enum PanelField: Hashable {
     case search
     case task(String)
     case rename(String)
+    case tagName
+    case organization(String)
 }
 
 struct PanelView: View {
@@ -14,6 +16,7 @@ struct PanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             searchBar
+            filterBar
             content
             footer
         }
@@ -57,6 +60,10 @@ struct PanelView: View {
             }
             Menu {
                 Button("Yenile") { library.refresh() }
+                Button("Yeni etiket…") { library.tagEditor = TagEditor() }
+                if library.organizations.count > 1 {
+                    Button("Hesap adlarını düzenle") { library.editingOrganizations = true }
+                }
                 Toggle("Girişte başlat", isOn: Binding(
                     get: { library.launchesAtLogin },
                     set: { library.setLaunchesAtLogin($0) }
@@ -84,6 +91,50 @@ struct PanelView: View {
         .padding(.bottom, 4)
     }
 
+    // MARK: - Filters
+
+    @ViewBuilder private var filterBar: some View {
+        let showsOrganizations = library.organizations.count > 1
+        let showsTags = library.tagEditor != nil || !library.tags.isEmpty
+        if showsOrganizations || showsTags {
+            VStack(alignment: .leading, spacing: 8) {
+                if showsOrganizations {
+                    if library.editingOrganizations {
+                        OrganizationEditor(library: library, focus: $focus)
+                    } else {
+                        Picker("Hesap", selection: $library.organizationFilter) {
+                            Text("Tümü").tag(String?.none)
+                            ForEach(library.organizations) { organization in
+                                Text(shortened(organization.name)).tag(String?.some(organization.id))
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                    }
+                }
+                if library.tagEditor != nil {
+                    TagEditorRow(library: library, focus: $focus)
+                } else if !library.tags.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(library.tags) { tag in
+                                TagChip(library: library, tag: tag)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+        }
+    }
+
+    /// Keeps the account switcher's segments an even width when a name is long.
+    private func shortened(_ name: String) -> String {
+        name.count > 16 ? String(name.prefix(15)) + "…" : name
+    }
+
     // MARK: - Content
 
     @ViewBuilder private var content: some View {
@@ -97,6 +148,8 @@ struct PanelView: View {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         if let results = library.results {
                             resultRows(results)
+                        } else if let tagged = library.tagged {
+                            taggedRows(tagged)
                         } else {
                             browseRows
                         }
@@ -127,7 +180,7 @@ struct PanelView: View {
             ForEach(library.recent) { session in
                 SessionRow(
                     library: library, session: session,
-                    rowKey: RowKey.recent(session.id), detail: session.projectName
+                    rowKey: RowKey.recent(session.id), detail: session.placeLabel
                 )
             }
         }
@@ -157,8 +210,33 @@ struct PanelView: View {
                 SessionRow(
                     library: library, session: hit.session,
                     rowKey: RowKey.hit(hit.id),
-                    detail: hit.snippet == nil ? hit.session.projectName : nil,
+                    detail: hit.snippet == nil ? hit.session.placeLabel : nil,
                     snippet: hit.snippet, detailLines: 2
+                )
+            }
+        }
+    }
+
+    @ViewBuilder private func taggedRows(_ sessions: [SessionRecord]) -> some View {
+        let name = library.tags.first { $0.id == library.tagFilter }?.name ?? ""
+        if sessions.isEmpty {
+            VStack(spacing: 4) {
+                Text("Bu etikette sohbet yok")
+                    .font(.system(size: 13, weight: .medium))
+                Text("Bir sohbete sağ tıklayıp Etiketler menüsünden “\(name)” etiketini verin.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 48)
+            .padding(.horizontal, 24)
+        } else {
+            SectionHeader(title: "\(name) · \(sessions.count) sohbet")
+            ForEach(sessions) { session in
+                SessionRow(
+                    library: library, session: session,
+                    rowKey: RowKey.tagged(session.id), detail: session.placeLabel
                 )
             }
         }
@@ -304,10 +382,16 @@ struct SessionRow: View {
 
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(style.title)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(session.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(style.title)
+                        .lineLimit(1)
+                    ForEach(library.tags(for: session).prefix(3)) { tag in
+                        TagMark(color: style.selected ? Color.white : TagPalette.color(tag.color))
+                            .help(tag.name)
+                    }
+                }
                 if let snippet {
                     Text(highlighted(snippet, style: style))
                         .font(.system(size: 11))
@@ -370,6 +454,16 @@ struct SessionRow: View {
         .disabled(live != nil)
         Divider()
         Button(pinned ? "Sabitlemeyi kaldır" : "Sabitle") { library.togglePin(session) }
+        Menu("Etiketler") {
+            ForEach(library.tags) { tag in
+                Toggle(tag.name, isOn: Binding(
+                    get: { session.tagIDs.contains(tag.id) },
+                    set: { _ in library.toggle(tag, on: session) }
+                ))
+            }
+            if !library.tags.isEmpty { Divider() }
+            Button("Yeni etiket…") { library.tagEditor = TagEditor(sessionID: session.id) }
+        }
         Divider()
         Button("Klasörü Finder'da göster") { Opener.revealFolder(session.cwd) }
         Button("Oturum kimliğini kopyala") { Opener.copy(session.id) }
@@ -455,7 +549,7 @@ struct PinnedCard: View {
 
     private var detailText: String {
         let open = item.openCount
-        return open == 0 ? item.session.projectName : "\(item.session.projectName) · \(open) açık görev"
+        return open == 0 ? item.session.placeLabel : "\(item.session.placeLabel) · \(open) açık görev"
     }
 
     private var addField: some View {
@@ -533,6 +627,160 @@ struct TaskRow: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - Tags and organizations
+
+enum TagPalette {
+    static let colors: [Color] = [.red, .orange, .yellow, .green, .blue, .purple, .gray]
+    static let names = ["Kırmızı", "Turuncu", "Sarı", "Yeşil", "Mavi", "Mor", "Gri"]
+
+    static func color(_ index: Int) -> Color {
+        colors[min(max(index, 0), colors.count - 1)]
+    }
+}
+
+/// The small colored square that marks a tag. Square, so it is not mistaken for the round
+/// indicator that shows a session is running.
+struct TagMark: View {
+    let color: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .fill(color)
+            .frame(width: 7, height: 7)
+    }
+}
+
+/// A tag in the filter row. Clicking it shows only the sessions that carry the tag.
+struct TagChip: View {
+    @ObservedObject var library: Library
+    let tag: Tag
+
+    var body: some View {
+        let selected = library.tagFilter == tag.id
+        let color = TagPalette.color(tag.color)
+        Button {
+            library.tagFilter = selected ? nil : tag.id
+        } label: {
+            HStack(spacing: 5) {
+                TagMark(color: color)
+                Text(tag.name)
+                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 22)
+            .background(Capsule().fill(selected ? color.opacity(0.28) : Color.primary.opacity(0.07)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Yeniden adlandır") {
+                library.tagEditor = TagEditor(tagID: tag.id, name: tag.name, color: tag.color)
+            }
+            Menu("Renk") {
+                ForEach(TagPalette.names.indices, id: \.self) { index in
+                    Button(TagPalette.names[index]) { library.recolor(tag, to: index) }
+                }
+            }
+            Divider()
+            Button("Etiketi sil", role: .destructive) { library.delete(tag) }
+        }
+    }
+}
+
+/// Names a new tag or renames an existing one, and picks its color.
+struct TagEditorRow: View {
+    @ObservedObject var library: Library
+    var focus: FocusState<PanelField?>.Binding
+
+    var body: some View {
+        HStack(spacing: 9) {
+            TextField("Etiket adı", text: Binding(
+                get: { library.tagEditor?.name ?? "" },
+                set: { library.tagEditor?.name = $0 }
+            ))
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .focused(focus, equals: .tagName)
+            .onSubmit { library.commitTagEditor() }
+
+            ForEach(TagPalette.names.indices, id: \.self) { index in
+                Button {
+                    library.tagEditor?.color = index
+                } label: {
+                    Circle()
+                        .fill(TagPalette.color(index))
+                        .frame(width: 12, height: 12)
+                        .padding(3)
+                        .overlay(
+                            Circle().strokeBorder(
+                                Color.primary.opacity(library.tagEditor?.color == index ? 0.75 : 0), lineWidth: 1.5
+                            )
+                        )
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help(TagPalette.names[index])
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
+        .onAppear {
+            DispatchQueue.main.async { focus.wrappedValue = .tagName }
+        }
+    }
+}
+
+/// Lets the user name their organizations, since Claude only stores the name of one.
+struct OrganizationEditor: View {
+    @ObservedObject var library: Library
+    var focus: FocusState<PanelField?>.Binding
+
+    @State private var drafts: [String: String] = [:]
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ForEach(library.organizations) { organization in
+                HStack(spacing: 8) {
+                    TextField("Hesap adı", text: Binding(
+                        get: { drafts[organization.id] ?? organization.name },
+                        set: { drafts[organization.id] = $0 }
+                    ))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused(focus, equals: .organization(organization.id))
+                    .onSubmit(save)
+                    Text(organization.isCurrent ? "şu an açık · \(organization.sessionCount)" : "\(organization.sessionCount)")
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
+            }
+            HStack {
+                Spacer()
+                Button("Bitti", action: save)
+                    .controlSize(.small)
+            }
+        }
+        .onAppear {
+            guard let first = library.organizations.first else { return }
+            DispatchQueue.main.async { focus.wrappedValue = .organization(first.id) }
+        }
+    }
+
+    private func save() {
+        for organization in library.organizations {
+            if let draft = drafts[organization.id] { library.rename(organization, to: draft) }
+        }
+        library.editingOrganizations = false
+        library.focusRequest += 1
     }
 }
 
