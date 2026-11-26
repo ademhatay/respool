@@ -155,7 +155,7 @@ enum ClaudeAccount {
               let id = account["organizationUuid"] as? String,
               let name = account["organizationName"] as? String, !name.isEmpty else { return nil }
         // A personal plan is stored as "<email>'s Organization"; show that as a plain label instead.
-        if name.hasSuffix("'s Organization") || name.hasSuffix("’s Organization") { return (id, "Kişisel") }
+        if name.hasSuffix("'s Organization") || name.hasSuffix("’s Organization") { return (id, L10n.personal) }
         return (id, name)
     }
 }

@@ -19,9 +19,9 @@ struct LiveSession: Hashable {
 
     var label: String {
         switch state {
-        case .working: return "Çalışıyor"
-        case .waiting: return "Sizi bekliyor"
-        case .idle: return "Açık"
+        case .working: return L10n.working
+        case .waiting: return L10n.waiting
+        case .idle: return L10n.idle
         }
     }
 }

@@ -20,8 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             library = try Library()
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Respool başlatılamadı"
-            alert.informativeText = "Dizin dosyası açılamadı: \(error)"
+            alert.messageText = L10n.launchFailed
+            alert.informativeText = L10n.indexUnopened("\(error)")
             alert.runModal()
             NSApp.terminate(nil)
             return
@@ -37,13 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Opener.open(session, live: library.live[session.id], desktopID: library.desktopID(for: session.id)) { outcome in
                 guard outcome == .failed else { return }
                 controller?.show()
-                library.show(notice: "Sohbet açılamadı")
+                library.show(notice: L10n.chatFailed)
             }
         }
         library.onOpenInDesktop = { [weak controller, weak library] session in
             guard let library else { return }
             if let live = library.live[session.id], live.isInTerminal {
-                library.show(notice: "Bu sohbet bir terminalde açık")
+                library.show(notice: L10n.chatOpenInTerminal)
                 return
             }
             if library.isInOtherOrganization(session.id) {
@@ -54,14 +54,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Opener.openInDesktop(session, desktopID: library.desktopID(for: session.id)) { outcome in
                 guard outcome == .failed else { return }
                 controller?.show()
-                library.show(notice: "Sohbet Claude'da açılamadı")
+                library.show(notice: L10n.chatFailedInClaude)
             }
         }
         library.onStartSession = { [weak controller, weak library] folder, prompt in
             controller?.hide()
             guard Opener.startSession(in: folder, prompt: prompt) else {
                 controller?.show()
-                library?.show(notice: "Oturum başlatılamadı")
+                library?.show(notice: L10n.sessionFailed)
                 return
             }
         }
@@ -83,9 +83,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let body: String
             if live.state == .waiting {
-                body = live.waitingFor.map { "Sizi bekliyor: \($0)" } ?? "Sizi bekliyor"
+                body = live.waitingFor.map(L10n.waitingFor) ?? L10n.waiting
             } else {
-                body = "Bitti, sıra sizde"
+                body = L10n.finished
             }
             notifier?.post(sessionID: id, title: session?.title ?? "Claude Code", body: body)
         }
@@ -108,9 +108,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func otherOrganizationNotice(for session: SessionRecord) -> String {
         if let name = session.organizationName {
-            return "\(name) hesabında. Claude'da hesabı değiştirin."
+            return L10n.inAccount(name)
         }
-        return "Başka bir hesapta. Claude'da hesabı değiştirin."
+        return L10n.inOtherAccount
     }
 
     /// Opening the app again (from Finder or Spotlight) brings the panel up.
@@ -149,15 +149,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let menu = NSMenu()
-        let refresh = NSMenuItem(title: "Yenile", action: #selector(refresh), keyEquivalent: "")
+        let refresh = NSMenuItem(title: L10n.refresh, action: #selector(refresh), keyEquivalent: "")
         refresh.target = self
         menu.addItem(refresh)
-        let login = NSMenuItem(title: "Girişte başlat", action: #selector(toggleLoginItem), keyEquivalent: "")
+        let login = NSMenuItem(title: L10n.launchAtLogin, action: #selector(toggleLoginItem), keyEquivalent: "")
         login.target = self
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Respool'dan çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: L10n.quit, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil

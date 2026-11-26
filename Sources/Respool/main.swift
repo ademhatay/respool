@@ -2,6 +2,11 @@ import AppKit
 
 let arguments = CommandLine.arguments
 
+// Developer modes can ask for a language, whatever the system speaks: `--lang en` or `--lang tr`.
+if let index = arguments.firstIndex(of: "--lang"), index + 1 < arguments.count {
+    L10n.override = arguments[index + 1].hasPrefix("tr") ? .turkish : .english
+}
+
 if arguments.contains("--index") {
     // Developer mode: index once, print what was found, and exit.
     do {
@@ -340,11 +345,11 @@ if arguments.contains("--selftest") {
         library.run(projectTask)
         let hasFolder = target.folders.contains { FileManager.default.fileExists(atPath: $0) }
         check("run starts a session for a project's task",
-              started?.prompt == projectTask.text || (!hasFolder && library.notice == "Proje klasörü bulunamadı"))
+              started?.prompt == projectTask.text || (!hasFolder && library.notice == L10n.projectFolderMissing))
         library.startSession(in: target)
         check("a new session starts in a project's folder with nothing typed",
               started.map { $0.prompt == "" && FileManager.default.fileExists(atPath: $0.folder) } == true
-              || (!hasFolder && library.notice == "Proje klasörü bulunamadı"))
+              || (!hasFolder && library.notice == L10n.projectFolderMissing))
         library.onStartSession = nil
 
         // Sorting and hiding only change the list; every project stays known.
@@ -454,7 +459,7 @@ if arguments.contains("--selftest") {
             library.backUp([session])
             check("a transcript is copied whole into the backups folder",
                   Retention.isBackedUp(session) && size(Retention.backupURL(for: session).path) == size(session.path)
-                  && library.backupCount == 1 && library.notice == "1 sohbet yedeklendi")
+                  && library.backupCount == 1 && library.notice == L10n.backedUpChats(1))
             library.backUp([session])
             check("backing up again keeps a single copy", library.backupCount == 1)
         }

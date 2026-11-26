@@ -8,7 +8,7 @@ you back to the one you pick.
 
 Respool is an independent project and is not affiliated with Anthropic.
 
-> The interface is in Turkish for now. An English localization is planned.
+> The interface is in English and Turkish, and follows your system language.
 
 ## What it does
 

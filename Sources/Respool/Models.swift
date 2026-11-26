@@ -36,7 +36,7 @@ struct SessionRecord: Identifiable, Hashable {
         if let line = prompt.split(whereSeparator: \.isNewline).first, !line.isEmpty {
             return String(line.prefix(80))
         }
-        return "Adsız sohbet"
+        return L10n.untitledChat
     }
 
     var hasCustomTitle: Bool {
@@ -160,10 +160,10 @@ enum ProjectSort: Int, CaseIterable, Hashable {
 
     var title: String {
         switch self {
-        case .activity: return "Son etkinlik"
-        case .name: return "Ad"
-        case .sessions: return "Sohbet sayısı"
-        case .tokens: return "Token kullanımı"
+        case .activity: return L10n.sortActivity
+        case .name: return L10n.sortName
+        case .sessions: return L10n.sortSessions
+        case .tokens: return L10n.sortTokens
         }
     }
 
@@ -257,7 +257,7 @@ enum PanelSection {
 enum Format {
     private static let dateTime: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "d MMM yyyy HH:mm"
         return formatter
     }()
@@ -267,9 +267,9 @@ enum Format {
         func scaled(_ divisor: Double, _ suffix: String) -> String {
             let value = (Double(count) / divisor * 10).rounded() / 10
             let text = value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
-            return text.replacingOccurrences(of: ".", with: ",") + suffix
+            return L10n.decimal(text) + suffix
         }
-        if count >= 1_000_000_000 { return scaled(1_000_000_000, " Mr") }
+        if count >= 1_000_000_000 { return scaled(1_000_000_000, L10n.billions) }
         if count >= 1_000_000 { return scaled(1_000_000, "M") }
         if count >= 10_000 { return "\(Int((Double(count) / 1000).rounded()))K" }
         if count >= 1000 { return scaled(1000, "K") }
@@ -278,7 +278,7 @@ enum Format {
 
     private static let grouped: NumberFormatter = {
         let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.numberStyle = .decimal
         return formatter
     }()
@@ -298,7 +298,7 @@ enum Format {
 
     private static let shortDateTime: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "d MMM HH:mm"
         return formatter
     }()
@@ -309,14 +309,14 @@ enum Format {
 
     private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "d MMMM EEEE"
         return formatter
     }()
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "HH:mm"
         return formatter
     }()
@@ -350,20 +350,20 @@ enum Format {
 
     private static let monthFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "LLLL yyyy"
         return formatter
     }()
 
     private static let shortDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "EEE d MMM"
         return formatter
     }()
 
     static func month(_ date: Date) -> String {
-        monthFormatter.string(from: date).capitalized(with: Locale(identifier: "tr_TR"))
+        monthFormatter.string(from: date).capitalized(with: Locale(identifier: L10n.localeIdentifier))
     }
 
     /// A day as "Pzt 30 Kas".
@@ -373,7 +373,7 @@ enum Format {
 
     private static let monthNameFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "LLLL"
         return formatter
     }()
@@ -399,14 +399,14 @@ enum Format {
     /// A length of time in its two largest units, such as "6 sa 40 dk" or "3 gün 2 sa".
     static func duration(_ seconds: TimeInterval) -> String {
         let minutes = Int(seconds / 60)
-        if minutes < 1 { return "1 dk'dan az" }
-        if minutes < 60 { return "\(minutes) dk" }
+        if minutes < 1 { return L10n.underMinute }
+        if minutes < 60 { return L10n.minutes(minutes) }
         let hours = minutes / 60
         if hours < 24 {
-            return minutes % 60 == 0 ? "\(hours) sa" : "\(hours) sa \(minutes % 60) dk"
+            return minutes % 60 == 0 ? L10n.hours(hours) : L10n.hoursAndMinutes(hours, minutes % 60)
         }
         let days = hours / 24
-        return hours % 24 == 0 ? "\(days) gün" : "\(days) gün \(hours % 24) sa"
+        return hours % 24 == 0 ? L10n.days(days) : L10n.daysAndHours(days, hours % 24)
     }
 
     static func path(_ path: String) -> String {
@@ -433,14 +433,14 @@ enum RowKey {
 enum RelativeTime {
     private static let sameYear: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "d MMM"
         return formatter
     }()
 
     private static let otherYear: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
         formatter.dateFormat = "MMM yyyy"
         return formatter
     }()
@@ -449,14 +449,14 @@ enum RelativeTime {
         guard let date else { return "" }
         let seconds = now.timeIntervalSince(date)
         let calendar = Calendar.current
-        if seconds < 60 { return "şimdi" }
-        if seconds < 3600 { return "\(Int(seconds / 60)) dk" }
-        if calendar.isDate(date, inSameDayAs: now) { return "\(Int(seconds / 3600)) sa" }
+        if seconds < 60 { return L10n.now }
+        if seconds < 3600 { return L10n.minutes(Int(seconds / 60)) }
+        if calendar.isDate(date, inSameDayAs: now) { return L10n.hours(Int(seconds / 3600)) }
         let days = calendar.dateComponents(
             [.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)
         ).day ?? 0
-        if days <= 1 { return "dün" }
-        if days < 7 { return "\(days) gün" }
+        if days <= 1 { return L10n.yesterday.lowercased() }
+        if days < 7 { return L10n.shortDays(days) }
         if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
             return sameYear.string(from: date)
         }

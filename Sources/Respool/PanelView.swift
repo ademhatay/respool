@@ -58,7 +58,7 @@ struct PanelView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-            TextField("Sohbetlerde ara", text: $library.query)
+            TextField(L10n.searchPlaceholder, text: $library.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .focused($focus, equals: .search)
@@ -71,14 +71,14 @@ struct PanelView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help("Aramayı temizle")
+                .help(L10n.clearSearch)
             }
             Menu {
-                Button("Yenile") { library.refresh() }
-                Button("Yeni etiket…") { library.tagEditor = TagEditor() }
-                Button("Ayarlar…") { library.showingSettings = true }
+                Button(L10n.refresh) { library.refresh() }
+                Button(L10n.newTag) { library.tagEditor = TagEditor() }
+                Button(L10n.settingsMenu) { library.showingSettings = true }
                 Divider()
-                Button("Respool'dan çık") { NSApp.terminate(nil) }
+                Button(L10n.quit) { NSApp.terminate(nil) }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .medium))
@@ -108,8 +108,8 @@ struct PanelView: View {
         if showsOrganizations || showsTags {
             VStack(alignment: .leading, spacing: 8) {
                 if showsOrganizations {
-                    Picker("Hesap", selection: $library.organizationFilter) {
-                        Text("Tümü").tag(String?.none)
+                    Picker(L10n.account, selection: $library.organizationFilter) {
+                        Text(L10n.all).tag(String?.none)
                         ForEach(library.organizations) { organization in
                             Text(shortened(organization.name)).tag(String?.some(organization.id))
                         }
@@ -182,7 +182,7 @@ struct PanelView: View {
 
         if !library.pinned.isEmpty {
             CollapsibleHeader(
-                library: library, title: "Sabitlenenler",
+                library: library, title: L10n.pinnedTitle,
                 section: PanelSection.pinned, count: library.pinned.count
             )
             if !library.isCollapsed(PanelSection.pinned) {
@@ -194,7 +194,7 @@ struct PanelView: View {
 
         if !library.recent.isEmpty {
             CollapsibleHeader(
-                library: library, title: "Son sohbetler",
+                library: library, title: L10n.recentTitle,
                 section: PanelSection.recent, count: library.recent.count
             )
             if !library.isCollapsed(PanelSection.recent) {
@@ -210,7 +210,7 @@ struct PanelView: View {
         WeekSection(library: library, focus: $focus)
 
         CollapsibleHeader(
-            library: library, title: "Projeler",
+            library: library, title: L10n.projectsTitle,
             section: PanelSection.projects, count: library.projects.count
         ) {
             ProjectListMenu(library: library)
@@ -220,7 +220,7 @@ struct PanelView: View {
                 ProjectSection(library: library, project: project, focus: $focus)
             }
             if library.projects.isEmpty, !library.allProjects.isEmpty {
-                Text("Bütün projeler gizli ya da süzülüyor.")
+                Text(L10n.allProjectsHidden)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
@@ -232,9 +232,9 @@ struct PanelView: View {
     @ViewBuilder private func resultRows(_ results: [SearchHit]) -> some View {
         if results.isEmpty {
             VStack(spacing: 4) {
-                Text("Sonuç yok")
+                Text(L10n.noResults)
                     .font(.system(size: 13, weight: .medium))
-                Text("“\(library.query)” hiçbir sohbette geçmiyor.")
+                Text(L10n.noMatch(library.query))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -243,7 +243,7 @@ struct PanelView: View {
             .padding(.top, 48)
             .padding(.horizontal, 24)
         } else {
-            SectionHeader(title: "\(results.count) sohbet")
+            SectionHeader(title: L10n.sessions(results.count))
             ForEach(results) { hit in
                 SessionRow(
                     library: library, session: hit.session,
@@ -259,9 +259,9 @@ struct PanelView: View {
         let name = library.tags.first { $0.id == library.tagFilter }?.name ?? ""
         if sessions.isEmpty {
             VStack(spacing: 4) {
-                Text("Bu etikette sohbet yok")
+                Text(L10n.noTaggedChats)
                     .font(.system(size: 13, weight: .medium))
-                Text("Bir sohbete sağ tıklayıp Etiketler menüsünden “\(name)” etiketini verin.")
+                Text(L10n.tagHint(name))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -270,7 +270,7 @@ struct PanelView: View {
             .padding(.top, 48)
             .padding(.horizontal, 24)
         } else {
-            SectionHeader(title: "\(name) · \(sessions.count) sohbet")
+            SectionHeader(title: "\(name) · \(L10n.sessions(sessions.count))")
             ForEach(sessions) { session in
                 SessionRow(
                     library: library, session: session,
@@ -286,7 +286,7 @@ struct PanelView: View {
             if let progress = library.indexing {
                 ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
                     .frame(width: 160)
-                Text("Sohbetler dizine ekleniyor")
+                Text(L10n.indexing)
                     .font(.system(size: 13, weight: .medium))
                     .padding(.top, 6)
                 Text("\(progress.done) / \(progress.total)")
@@ -294,9 +294,9 @@ struct PanelView: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             } else {
-                Text("Henüz sohbet yok")
+                Text(L10n.noChats)
                     .font(.system(size: 13, weight: .medium))
-                Text("Claude Code'da bir sohbet başlattığınızda burada görünür.")
+                Text(L10n.noChatsHint)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -333,8 +333,7 @@ struct PanelView: View {
         }
         // Says how many projects are left out, when the list is thinner than the index.
         let shown = library.projects.count, total = library.allProjects.count
-        let projects = shown == total ? "\(shown)" : "\(shown)/\(total)"
-        return "\(library.sessionCount) sohbet · \(projects) proje"
+        return L10n.statusLine(library.sessionCount, projectsShown: shown, projectsTotal: total)
     }
 }
 
@@ -381,7 +380,7 @@ struct CollapsibleHeader<Trailing: View>: View {
             }
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
-            .help(collapsed ? "Bölümü göster" : "Bölümü gizle")
+            .help(collapsed ? L10n.showSection : L10n.hideSection)
             trailing()
                 .padding(.trailing, 4)
         }
@@ -505,14 +504,14 @@ struct SessionRow: View {
                 .opacity(hovering ? 0 : 1)
                 HStack(spacing: 0) {
                     if let onAddTask {
-                        IconButton(symbol: "plus", help: "Görev ekle", style: style, action: onAddTask)
+                        IconButton(symbol: "plus", help: L10n.addTask, style: style, action: onAddTask)
                     }
-                    IconButton(symbol: "list.bullet", help: "İstem dökümü", style: style) {
+                    IconButton(symbol: "list.bullet", help: L10n.promptOutline, style: style) {
                         library.showOutline(for: session)
                     }
                     IconButton(
                         symbol: pinned ? "pin.slash" : "pin",
-                        help: pinned ? "Sabitlemeyi kaldır" : "Sabitle",
+                        help: pinned ? L10n.unpin : L10n.pin,
                         style: style
                     ) {
                         library.togglePin(session)
@@ -537,16 +536,16 @@ struct SessionRow: View {
     }
 
     @ViewBuilder private func menu(pinned: Bool, live: LiveSession?) -> some View {
-        Button("Claude uygulamasında aç") { library.openInDesktop(session) }
-        Button("Terminalde sürdür") {
-            if !Opener.openInTerminal(session) { library.show(notice: "Terminal açılamadı") }
+        Button(L10n.openInClaude) { library.openInDesktop(session) }
+        Button(L10n.resumeInTerminal) {
+            if !Opener.openInTerminal(session) { library.show(notice: L10n.terminalFailed) }
         }
         .disabled(live != nil)
-        Button("İstem dökümü") { library.showOutline(for: session) }
+        Button(L10n.promptOutline) { library.showOutline(for: session) }
         Divider()
-        Button(pinned ? "Sabitlemeyi kaldır" : "Sabitle") { library.togglePin(session) }
-        Button("Görev ekle") { library.beginTask(linkedTo: .session(id: session.id, title: session.title)) }
-        Menu("Etiketler") {
+        Button(pinned ? L10n.unpin : L10n.pin) { library.togglePin(session) }
+        Button(L10n.addTask) { library.beginTask(linkedTo: .session(id: session.id, title: session.title)) }
+        Menu(L10n.tags) {
             ForEach(library.tags) { tag in
                 Toggle(tag.name, isOn: Binding(
                     get: { session.tagIDs.contains(tag.id) },
@@ -554,12 +553,12 @@ struct SessionRow: View {
                 ))
             }
             if !library.tags.isEmpty { Divider() }
-            Button("Yeni etiket…") { library.tagEditor = TagEditor(sessionID: session.id) }
+            Button(L10n.newTag) { library.tagEditor = TagEditor(sessionID: session.id) }
         }
         Divider()
-        Button("Dökümü yedekle") { library.backUp([session]) }
-        Button("Klasörü Finder'da göster") { Opener.revealFolder(session.cwd) }
-        Button("Oturum kimliğini kopyala") { Opener.copy(session.id) }
+        Button(L10n.backUpTranscript) { library.backUp([session]) }
+        Button(L10n.showInFinder) { Opener.revealFolder(session.cwd) }
+        Button(L10n.copySessionID) { Opener.copy(session.id) }
     }
 
     private func highlighted(_ snippet: Snippet, style: RowStyle) -> AttributedString {
@@ -589,10 +588,10 @@ struct ExpiryMark: View {
 
     private var text: String {
         if expiry.backedUp {
-            return expiry.days == 0 ? "Silinmeden yedeği alındı" : "Silinmeden yedeği alındı · \(expiry.days) gün kaldı"
+            return expiry.days == 0 ? L10n.backedUp : L10n.backedUpDaysLeft(expiry.days)
         }
-        if expiry.days == 0 { return "Claude Code bu sohbeti artık silebilir" }
-        return "Claude Code bu sohbeti \(expiry.days) gün içinde silebilir"
+        if expiry.days == 0 { return L10n.mayDeleteNow }
+        return L10n.mayDeleteIn(expiry.days)
     }
 }
 
@@ -606,12 +605,12 @@ struct ExpiryBanner: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.orange)
-            Text("\(sessions.count) sohbet yakında silinebilir")
+            Text(L10n.expiringChats(sessions.count))
                 .font(.system(size: 12))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            Button("Yedekle") { library.backUp(sessions) }
+            Button(L10n.backUp) { library.backUp(sessions) }
                 .controlSize(.small)
         }
         .padding(.horizontal, 12)
@@ -663,7 +662,7 @@ struct TodoSection: View {
 
     var body: some View {
         CollapsibleHeader(
-            library: library, title: "Yapılacaklar",
+            library: library, title: L10n.todosTitle,
             section: PanelSection.todos, count: library.openListedTaskCount
         )
         if !library.isCollapsed(PanelSection.todos) {
@@ -678,7 +677,7 @@ struct TodoSection: View {
         // Tasks whose day has passed are late wherever they are listed, so they only join today's.
         let overdue = day == library.today ? library.overdueTasks : []
         if !overdue.isEmpty {
-            groupTitle("Gecikmiş")
+            groupTitle(L10n.overdue)
             ForEach(overdue) { task in
                 TaskRow(library: library, task: task, listedDay: day, list: overdue)
             }
@@ -689,7 +688,7 @@ struct TodoSection: View {
         }
         let undated = library.undatedTasks
         if !undated.isEmpty {
-            groupTitle("Tarihsiz")
+            groupTitle(L10n.noDate)
             ForEach(undated) { task in
                 TaskRow(library: library, task: task, listedDay: day, list: undated)
             }
@@ -711,7 +710,7 @@ struct TodoSection: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.tertiary)
                 .frame(width: 14)
-            TextField("Görev ekle", text: $draft)
+            TextField(L10n.addTask, text: $draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .focused(focus, equals: .todo)
@@ -729,7 +728,7 @@ struct TodoSection: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .fixedSize()
-                .help("Yeni görevler bu güne eklenir. Başka bir gün için takvimden gün seçin.")
+                .help(L10n.newTaskDayHelp)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -758,7 +757,7 @@ struct TodoSection: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Bağlantıyı kaldır")
+            .help(L10n.removeLink)
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)
@@ -766,7 +765,7 @@ struct TodoSection: View {
         .padding(.trailing, 3)
         .frame(height: 20)
         .background(Capsule().fill(Color.primary.opacity(0.07)))
-        .help("Görev buna bağlanacak: \(link.title)")
+        .help(L10n.taskLinkHelp(link.title))
     }
 }
 
@@ -811,7 +810,7 @@ struct TaskCalendar: View {
     private func header(days: [Date]) -> some View {
         let expanded = library.calendarExpanded
         return HStack(spacing: 2) {
-            arrow("chevron.left", expanded ? "Önceki ay" : "Önceki hafta", step: -1)
+            arrow("chevron.left", expanded ? L10n.previousMonth : L10n.previousWeek, step: -1)
             Button {
                 withAnimation(.easeOut(duration: 0.15)) { library.calendarExpanded.toggle() }
             } label: {
@@ -824,17 +823,17 @@ struct TaskCalendar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(expanded ? "Hafta görünümüne geç" : "Ay görünümüne geç")
-            arrow("chevron.right", expanded ? "Sonraki ay" : "Sonraki hafta", step: 1)
+            .help(expanded ? L10n.weekView : L10n.monthView)
+            arrow("chevron.right", expanded ? L10n.nextMonth : L10n.nextWeek, step: 1)
             Spacer(minLength: 4)
-            Button("Bugün") { withAnimation(.easeOut(duration: 0.15)) { library.showToday() } }
+            Button(L10n.today) { withAnimation(.easeOut(duration: 0.15)) { library.showToday() } }
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 7)
                 .frame(height: 22)
                 .contentShape(Rectangle())
-                .help("Bugüne dön")
+                .help(L10n.backToToday)
                 .opacity(library.selectedDay == library.today ? 0.5 : 1)
         }
     }
@@ -947,7 +946,7 @@ struct PinnedCard: View {
 
     private var detailText: String {
         let open = item.openCount
-        return open == 0 ? item.session.placeLabel : "\(item.session.placeLabel) · \(open) açık görev"
+        return open == 0 ? item.session.placeLabel : L10n.openTasksLine(item.session.placeLabel, open)
     }
 
     private var addField: some View {
@@ -955,7 +954,7 @@ struct PinnedCard: View {
             Image(systemName: "circle")
                 .font(.system(size: 14))
                 .foregroundStyle(.tertiary)
-            TextField("Görev ekle", text: $draft)
+            TextField(L10n.addTask, text: $draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .focused(focus, equals: .task(item.id))
@@ -1021,7 +1020,7 @@ struct TaskRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(task.done ? "Yapılmadı olarak işaretle" : "Tamamlandı olarak işaretle")
+            .help(task.done ? L10n.markNotDone : L10n.markDone)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(task.text)
@@ -1044,7 +1043,7 @@ struct TaskRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Görevi Claude'da başlat")
+                .help(L10n.startTaskInClaude)
                 .opacity(hovering ? 1 : 0)
             }
             Button {
@@ -1057,7 +1056,7 @@ struct TaskRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Görevi sil")
+            .help(L10n.deleteTask)
             .opacity(hovering ? 1 : 0)
         }
         .padding(.horizontal, 8)
@@ -1095,10 +1094,10 @@ struct TaskRow: View {
     }
 
     @ViewBuilder private var menu: some View {
-        Menu("Tarih") {
+        Menu(L10n.date) {
             let tomorrow = Format.dayKey(Library.calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date())
-            Toggle("Bugün", isOn: isDue(library.today))
-            Toggle("Yarın", isOn: isDue(tomorrow))
+            Toggle(L10n.today, isOn: isDue(library.today))
+            Toggle(L10n.tomorrow, isOn: isDue(tomorrow))
             // Today and tomorrow are above; the rest of what the calendar shows follows.
             let upcoming = library.calendarDays.map(Format.dayKey).filter { $0 > tomorrow }
             if !upcoming.isEmpty {
@@ -1108,19 +1107,19 @@ struct TaskRow: View {
                 }
             }
             Divider()
-            Toggle("Tarihsiz", isOn: isDue(nil))
+            Toggle(L10n.noDate, isOn: isDue(nil))
         }
-        Menu("Projeye bağla") {
+        Menu(L10n.linkToProject) {
             ForEach(library.allProjects) { project in
                 Button(project.name) { library.link(task, toProject: project.key) }
             }
             if !task.sessionID.isEmpty || task.projectKey != nil {
                 Divider()
-                Button("Bağlantıyı kaldır") { library.link(task, toProject: nil) }
+                Button(L10n.removeLink) { library.link(task, toProject: nil) }
             }
         }
         Divider()
-        Button("Sil", role: .destructive) { library.delete(task) }
+        Button(L10n.delete, role: .destructive) { library.delete(task) }
     }
 
     private func isDue(_ day: String?) -> Binding<Bool> {
@@ -1196,7 +1195,7 @@ struct WeekSection: View {
     var body: some View {
         if library.showsWeek, !library.week.isEmpty {
             CollapsibleHeader(
-                library: library, title: "Bu hafta",
+                library: library, title: L10n.weekTitle,
                 section: PanelSection.week,
                 count: Set(library.week.flatMap(\.work).map(\.id)).count
             )
@@ -1208,7 +1207,7 @@ struct WeekSection: View {
                             SessionRow(
                                 library: library, session: work.session,
                                 rowKey: RowKey.day(day.day, work.id),
-                                detail: "\(work.session.placeLabel) · \(Format.count(work.prompts)) istem",
+                                detail: L10n.promptsLine(work.session.placeLabel, work.prompts),
                                 inset: 16
                             )
                         }
@@ -1241,7 +1240,7 @@ struct DayRow: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text("\(day.work.count) sohbet · \(Format.count(day.prompts)) istem")
+                Text(L10n.daySummary(day.work.count, day.prompts))
                     .font(.system(size: 11))
                     .monospacedDigit()
                     .foregroundStyle(.tertiary)
@@ -1255,7 +1254,7 @@ struct DayRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(expanded ? "Günün sohbetlerini gizle" : "Günün sohbetlerini göster")
+        .help(expanded ? L10n.hideDay : L10n.showDay)
     }
 }
 
@@ -1263,7 +1262,7 @@ struct DayRow: View {
 
 enum TagPalette {
     static let colors: [Color] = [.red, .orange, .yellow, .green, .blue, .purple, .gray]
-    static let names = ["Kırmızı", "Turuncu", "Sarı", "Yeşil", "Mavi", "Mor", "Gri"]
+    static var names: [String] { L10n.colorNames }
 
     static func color(_ index: Int) -> Color {
         colors[min(max(index, 0), colors.count - 1)]
@@ -1306,16 +1305,16 @@ struct TagChip: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("Yeniden adlandır") {
+            Button(L10n.rename) {
                 library.tagEditor = TagEditor(tagID: tag.id, name: tag.name, color: tag.color)
             }
-            Menu("Renk") {
+            Menu(L10n.color) {
                 ForEach(TagPalette.names.indices, id: \.self) { index in
                     Button(TagPalette.names[index]) { library.recolor(tag, to: index) }
                 }
             }
             Divider()
-            Button("Etiketi sil", role: .destructive) { library.delete(tag) }
+            Button(L10n.deleteTag, role: .destructive) { library.delete(tag) }
         }
     }
 }
@@ -1327,7 +1326,7 @@ struct TagEditorRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            TextField("Etiket adı", text: Binding(
+            TextField(L10n.tagName, text: Binding(
                 get: { library.tagEditor?.name ?? "" },
                 set: { library.tagEditor?.name = $0 }
             ))
@@ -1375,7 +1374,7 @@ struct OrganizationEditor: View {
         VStack(spacing: 6) {
             ForEach(library.organizations) { organization in
                 HStack(spacing: 8) {
-                    TextField("Hesap adı", text: Binding(
+                    TextField(L10n.accountName, text: Binding(
                         get: { drafts[organization.id] ?? organization.name },
                         set: { drafts[organization.id] = $0 }
                     ))
@@ -1383,7 +1382,7 @@ struct OrganizationEditor: View {
                     .font(.system(size: 12))
                     .focused(focus, equals: .organization(organization.id))
                     .onSubmit(save)
-                    Text(organization.isCurrent ? "şu an açık · \(organization.sessionCount)" : "\(organization.sessionCount)")
+                    Text(L10n.accountState(organization.sessionCount, current: organization.isCurrent))
                         .font(.system(size: 11))
                         .monospacedDigit()
                         .foregroundStyle(.tertiary)
@@ -1395,7 +1394,7 @@ struct OrganizationEditor: View {
             if hasChanges {
                 HStack {
                     Spacer()
-                    Button("Adları kaydet", action: save)
+                    Button(L10n.saveNames, action: save)
                         .controlSize(.small)
                 }
             }
@@ -1481,7 +1480,7 @@ struct DetailCard: View {
                 if let live = library.live[session.id] {
                     Text("·").foregroundStyle(.tertiary)
                     LiveIndicator(live: live, selected: false)
-                    Text(live.label + (live.isInTerminal ? ", terminalde" : ", Claude'da"))
+                    Text(live.label + (live.isInTerminal ? L10n.inTerminal : L10n.inClaude))
                 }
             }
             .font(.system(size: 11))
@@ -1504,20 +1503,20 @@ struct DetailCard: View {
         }
 
         HStack(spacing: 6) {
-            StatTile(value: Format.count(session.messageCount), label: "İstem")
-            StatTile(value: duration(of: session), label: "Süre")
-            StatTile(value: Format.bytes(session.fileSize), label: "Boyut")
+            StatTile(value: Format.count(session.messageCount), label: L10n.prompts)
+            StatTile(value: duration(of: session), label: L10n.duration)
+            StatTile(value: Format.bytes(session.fileSize), label: L10n.size)
         }
 
-        section("Token") {
+        section(L10n.tokens) {
             HStack(spacing: 6) {
-                StatTile(value: Format.tokens(session.inputTokens), label: "Girdi")
-                StatTile(value: Format.tokens(session.cachedTokens), label: "Önbellek")
-                StatTile(value: Format.tokens(session.outputTokens), label: "Çıktı")
+                StatTile(value: Format.tokens(session.inputTokens), label: L10n.input)
+                StatTile(value: Format.tokens(session.cachedTokens), label: L10n.cache)
+                StatTile(value: Format.tokens(session.outputTokens), label: L10n.output)
             }
         }
 
-        section("Etkinlik") { activityChart }
+        section(L10n.activity) { activityChart }
 
         VStack(alignment: .leading, spacing: 5) {
             if let model = session.model { fact("cpu", model) }
@@ -1558,20 +1557,20 @@ struct DetailCard: View {
         }
 
         HStack(spacing: 6) {
-            StatTile(value: Format.count(sessions.count), label: "Sohbet")
-            StatTile(value: Format.count(sessions.reduce(0) { $0 + $1.messageCount }), label: "İstem")
-            StatTile(value: Format.bytes(sessions.reduce(0) { $0 + $1.fileSize }), label: "Boyut")
+            StatTile(value: Format.count(sessions.count), label: L10n.chats)
+            StatTile(value: Format.count(sessions.reduce(0) { $0 + $1.messageCount }), label: L10n.prompts)
+            StatTile(value: Format.bytes(sessions.reduce(0) { $0 + $1.fileSize }), label: L10n.size)
         }
 
-        section("Token") {
+        section(L10n.tokens) {
             HStack(spacing: 6) {
-                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.inputTokens }), label: "Girdi")
-                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.cachedTokens }), label: "Önbellek")
-                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.outputTokens }), label: "Çıktı")
+                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.inputTokens }), label: L10n.input)
+                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.cachedTokens }), label: L10n.cache)
+                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.outputTokens }), label: L10n.output)
             }
         }
 
-        section("Son 30 gün") { activityChart }
+        section(L10n.last30Days) { activityChart }
 
         if !project.folders.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
@@ -1579,7 +1578,7 @@ struct DetailCard: View {
                     fact("folder", Format.path(folder))
                 }
                 if project.folders.count > 5 {
-                    Text("ve \(project.folders.count - 5) klasör daha")
+                    Text(L10n.moreFolders(project.folders.count - 5))
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                         .padding(.leading, 20)
@@ -1663,11 +1662,11 @@ struct ContextGauge: View {
         let fraction = min(Double(tokens) / Self.scale, 1)
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Bağlam")
+                Text(L10n.context)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text(Format.tokens(tokens) + " token")
+                Text(Format.tokens(tokens) + " " + L10n.tokenWord)
                     .font(.system(size: 12, weight: .semibold))
                     .monospacedDigit()
             }
@@ -1730,7 +1729,7 @@ struct OutlineView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if outline.entries.isEmpty {
-                Text("Bu sohbette yazılmış bir istem bulunamadı.")
+                Text(L10n.outlineEmpty)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -1765,21 +1764,21 @@ struct OutlineView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Geri")
+            .help(L10n.back)
             VStack(alignment: .leading, spacing: 2) {
                 Text(outline.session.title)
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("\(outline.session.placeLabel) · \(outline.entries.count) istem")
+                Text(L10n.promptsLine(outline.session.placeLabel, outline.entries.count))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 3)
             Spacer(minLength: 8)
-            Button("Aç") { library.open(outline.session) }
+            Button(L10n.open) { library.open(outline.session) }
                 .controlSize(.small)
-                .help("Sohbeti aç")
+                .help(L10n.openChat)
         }
         .padding(.horizontal, 12)
         .padding(.top, 14)
@@ -1789,7 +1788,7 @@ struct OutlineView: View {
     private var days: [(title: String, entries: [OutlineEntry])] {
         var groups: [(title: String, entries: [OutlineEntry])] = []
         for entry in outline.entries {
-            let title = entry.date.map(Format.day) ?? "Tarihsiz"
+            let title = entry.date.map(Format.day) ?? L10n.noDate
             if groups.last?.title == title {
                 groups[groups.count - 1].entries.append(entry)
             } else {
@@ -1829,9 +1828,9 @@ struct OutlineRow: View {
         .onHover { hovering = $0 }
         .onTapGesture { expanded.toggle() }
         .contextMenu {
-            Button("Kopyala") {
+            Button(L10n.copy) {
                 Opener.copy(entry.text)
-                library.show(notice: "İstem kopyalandı")
+                library.show(notice: L10n.promptCopied)
             }
         }
     }
@@ -1858,8 +1857,8 @@ struct SettingsView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Geri")
-                Text("Ayarlar")
+                .help(L10n.back)
+                Text(L10n.settingsTitle)
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
             }
@@ -1871,10 +1870,10 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     SettingsGroup {
-                        SettingsRow(title: "Kısayol") { shortcutButton }
+                        SettingsRow(title: L10n.shortcut) { shortcutButton }
                     }
                     SettingsGroup {
-                        SettingsRow(title: "Girişte başlat") {
+                        SettingsRow(title: L10n.launchAtLogin) {
                             Toggle("", isOn: Binding(
                                 get: { library.launchesAtLogin },
                                 set: { library.setLaunchesAtLogin($0) }
@@ -1885,7 +1884,7 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroup {
-                        SettingsRow(title: "Bildirimler") {
+                        SettingsRow(title: L10n.notifications) {
                             Toggle("", isOn: $library.notificationsEnabled)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
@@ -1893,7 +1892,7 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroup {
-                        SettingsRow(title: "Yapılacakları göster") {
+                        SettingsRow(title: L10n.showTodos) {
                             Toggle("", isOn: $library.showsTodos)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
@@ -1901,7 +1900,7 @@ struct SettingsView: View {
                         }
                     }
                     SettingsGroup {
-                        SettingsRow(title: "Hafta özetini göster") {
+                        SettingsRow(title: L10n.showWeek) {
                             Toggle("", isOn: $library.showsWeek)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
@@ -1910,14 +1909,14 @@ struct SettingsView: View {
                     }
                     if library.backupCount > 0 {
                         SettingsGroup {
-                            SettingsRow(title: "Yedekler · \(Format.count(library.backupCount)) dosya · \(Format.bytes(library.backupBytes))") {
-                                Button("Finder'da göster") { Opener.revealFolder(Retention.folder.path) }
+                            SettingsRow(title: L10n.backups(library.backupCount, Format.bytes(library.backupBytes))) {
+                                Button(L10n.show) { Opener.revealFolder(Retention.folder.path) }
                                     .controlSize(.small)
                             }
                         }
                     }
                     SettingsGroup {
-                        SettingsRow(title: "Hesapları göster") {
+                        SettingsRow(title: L10n.showAccounts) {
                             Toggle("", isOn: $library.showsOrganizations)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
@@ -1927,14 +1926,14 @@ struct SettingsView: View {
                     if library.showsOrganizations {
                         if library.organizations.count > 1 {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Hesap adları")
+                                Text(L10n.accountNames)
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.secondary)
                                     .padding(.horizontal, 4)
                                 OrganizationEditor(library: library, focus: focus)
                             }
                         } else {
-                            Text("Bu bilgisayarda tek bir organizasyonun sohbetleri var; seçici görünmeyecek.")
+                            Text(L10n.oneOrganization)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 4)
@@ -1942,7 +1941,7 @@ struct SettingsView: View {
                     }
                     if !library.hiddenProjectList.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Gizli projeler")
+                            Text(L10n.hiddenProjects)
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 4)
@@ -1954,7 +1953,7 @@ struct SettingsView: View {
                                                 .font(.system(size: 13))
                                                 .lineLimit(1)
                                             Spacer(minLength: 8)
-                                            Button("Geri getir") { library.unhide(project) }
+                                            Button(L10n.bringBack) { library.unhide(project) }
                                                 .controlSize(.small)
                                         }
                                         .padding(.horizontal, 12)
@@ -1997,12 +1996,12 @@ struct SettingsView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(library.recordingShortcut ? "Vazgeçmek için esc" : "Kısayolu değiştir")
+        .help(library.recordingShortcut ? L10n.escToCancel : L10n.changeShortcut)
     }
 
     private var shortcutText: String {
-        if library.recordingShortcut { return "Tuşlara basın…" }
-        return library.shortcutLabel.isEmpty ? "Atanmadı" : library.shortcutLabel
+        if library.recordingShortcut { return L10n.pressKeys }
+        return library.shortcutLabel.isEmpty ? L10n.notAssigned : library.shortcutLabel
     }
 }
 
@@ -2061,7 +2060,7 @@ struct ProjectSection: View {
                     Button {
                         library.showingAll.insert(project.key)
                     } label: {
-                        Text("\(project.sessions.count - visible.count) sohbet daha")
+                        Text(L10n.moreSessions(project.sessions.count - visible.count))
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 24)
@@ -2094,7 +2093,7 @@ struct ProjectSection: View {
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .frame(width: 10)
             if library.renamingProject == project.key {
-                TextField("Proje adı", text: $draft)
+                TextField(L10n.projectName, text: $draft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
                     .focused(focus, equals: .rename(project.key))
@@ -2114,7 +2113,7 @@ struct ProjectSection: View {
             }
             Spacer(minLength: 4)
             if hovering {
-                IconButton(symbol: "terminal", help: "Bu projede yeni sohbet başlat", style: RowStyle(selected: false)) {
+                IconButton(symbol: "terminal", help: L10n.startChatHere, style: RowStyle(selected: false)) {
                     library.startSession(in: project)
                 }
             }
@@ -2138,21 +2137,21 @@ struct ProjectSection: View {
     }
 
     @ViewBuilder private var menu: some View {
-        Button("Yeni sohbet başlat") { library.startSession(in: project) }
-        Button("Görev ekle") { library.beginTask(linkedTo: .project(key: project.key, name: project.name)) }
-        Button("Yeniden adlandır") { library.renamingProject = project.key }
-        Menu("Şununla birleştir") {
+        Button(L10n.startChat) { library.startSession(in: project) }
+        Button(L10n.addTask) { library.beginTask(linkedTo: .project(key: project.key, name: project.name)) }
+        Button(L10n.rename) { library.renamingProject = project.key }
+        Menu(L10n.mergeInto) {
             ForEach(library.allProjects.filter { $0.key != project.key }) { other in
                 Button(other.name) { library.merge(project, into: other) }
             }
         }
         if !project.mergedKeys.isEmpty {
-            Button("Birleştirmeyi geri al") { library.separate(project) }
+            Button(L10n.undoMerge) { library.separate(project) }
         }
         Divider()
-        Button("Gizle") { library.hide(project) }
+        Button(L10n.hide) { library.hide(project) }
         if let folder = project.folders.first {
-            Button("Klasörü Finder'da göster") { Opener.revealFolder(folder) }
+            Button(L10n.showInFinder) { Opener.revealFolder(folder) }
         }
     }
 }
@@ -2174,12 +2173,12 @@ struct ProjectListMenu: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .help("Projeleri sırala ya da süz")
+                    .help(L10n.sortOrFilter)
             }
     }
 
     @ViewBuilder private var choices: some View {
-        Menu("Sıralama") {
+        Menu(L10n.sortBy) {
             ForEach(ProjectSort.allCases, id: \.self) { sort in
                 Toggle(sort.title, isOn: Binding(
                     get: { library.projectSort == sort },
@@ -2188,11 +2187,11 @@ struct ProjectListMenu: View {
             }
         }
         Divider()
-        Toggle("Tek sohbetlik projeleri gizle", isOn: $library.hidesSingleSessionProjects)
-        Toggle("Son 30 günde etkin olmayanları gizle", isOn: $library.hidesInactiveProjects)
+        Toggle(L10n.hideSingleSessionProjects, isOn: $library.hidesSingleSessionProjects)
+        Toggle(L10n.hideInactiveProjects, isOn: $library.hidesInactiveProjects)
         if !library.hiddenProjects.isEmpty {
             Divider()
-            Button("Gizli projeleri yönet…") { library.showingSettings = true }
+            Button(L10n.manageHidden) { library.showingSettings = true }
         }
     }
 

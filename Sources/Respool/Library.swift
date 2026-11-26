@@ -380,7 +380,7 @@ final class Library: ObservableObject {
             record.contextTokens = row.optionalInt(17)
             record.model = row.text(18)
             let identity = identities[cwd] ?? {
-                let fallback = ProjectResolver.fallback(cwd.isEmpty ? "Diğer" : cwd, durable: false)
+                let fallback = ProjectResolver.fallback(cwd.isEmpty ? L10n.otherProject : cwd, durable: false)
                 return (fallback.key, fallback.name)
             }()
             if defaultNames[identity.key] == nil { defaultNames[identity.key] = identity.name }
@@ -414,7 +414,7 @@ final class Library: ObservableObject {
             return (organizationCounts[first] ?? 0) > (organizationCounts[second] ?? 0)
         }
         snapshot.organizations = organizationIDs.enumerated().map { position, id in
-            let fallback = signedIn?.id == id ? signedIn!.name : "Hesap \(position + 1)"
+            let fallback = signedIn?.id == id ? signedIn!.name : L10n.accountNumber(position + 1)
             return Organization(
                 id: id, name: customOrganizationNames[id] ?? fallback,
                 isCurrent: id == currentOrganization, sessionCount: organizationCounts[id] ?? 0
@@ -753,7 +753,7 @@ final class Library: ObservableObject {
     }
 
     func setLaunchesAtLogin(_ enabled: Bool) {
-        if !LoginItem.set(enabled) { show(notice: "Giriş öğesi değiştirilemedi") }
+        if !LoginItem.set(enabled) { show(notice: L10n.loginItemFailed) }
         launchesAtLogin = LoginItem.isEnabled
     }
 
@@ -918,7 +918,7 @@ final class Library: ObservableObject {
     private static func outlineText(_ text: String) -> String {
         let range = NSRange(text.startIndex..., in: text)
         let cleaned = pastedBlock.stringByReplacingMatches(
-            in: text, range: range, withTemplate: "[yapıştırılan içerik]"
+            in: text, range: range, withTemplate: L10n.pastedContent
         )
         return String(cleaned.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1200))
     }
@@ -1018,12 +1018,12 @@ final class Library: ObservableObject {
     /// A day as "Bugün", "Yarın" or "Per 26 Kas".
     func dayLabel(_ key: String) -> String {
         let calendar = Self.calendar
-        if key == today { return "Bugün" }
+        if key == today { return L10n.today }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: Date()), key == Format.dayKey(tomorrow) {
-            return "Yarın"
+            return L10n.tomorrow
         }
         if let yesterday = calendar.date(byAdding: .day, value: -1, to: Date()), key == Format.dayKey(yesterday) {
-            return "Dün"
+            return L10n.yesterday
         }
         return Format.date(fromDayKey: key).map(Format.shortDay) ?? key
     }
@@ -1087,11 +1087,11 @@ final class Library: ObservableObject {
     func run(_ task: TaskItem) {
         if !task.sessionID.isEmpty, let session = allSessions[task.sessionID] {
             Opener.copy(task.text)
-            show(notice: "Görev panoya kopyalandı")
+            show(notice: L10n.taskCopied)
             open(session)
         } else if let key = task.projectKey, let project = allProjects.first(where: { $0.key == key }) {
             guard let folder = existingFolder(of: project) else {
-                show(notice: "Proje klasörü bulunamadı")
+                show(notice: L10n.projectFolderMissing)
                 return
             }
             onStartSession?(folder, task.text)
@@ -1101,7 +1101,7 @@ final class Library: ObservableObject {
     /// Starts a new session in a project's folder, with nothing typed yet.
     func startSession(in project: ProjectGroup) {
         guard let folder = existingFolder(of: project) else {
-            show(notice: "Proje klasörü bulunamadı")
+            show(notice: L10n.projectFolderMissing)
             return
         }
         onStartSession?(folder, "")
@@ -1126,7 +1126,7 @@ final class Library: ObservableObject {
 
     static let calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.locale = Locale(identifier: "tr_TR")
+        calendar.locale = Locale(identifier: L10n.localeIdentifier)
         calendar.firstWeekday = 2
         return calendar
     }()
@@ -1219,7 +1219,7 @@ final class Library: ObservableObject {
                 guard let id = row.text(0), ids.contains(id), let stamp = row.double(1), stamp >= start, stamp < end else { return }
                 buckets[min(Int((stamp - start) / day), count - 1)] += 1
             }
-            return ActivitySeries(key: subject.key, buckets: buckets, startLabel: "\(count) gün önce", endLabel: "bugün")
+            return ActivitySeries(key: subject.key, buckets: buckets, startLabel: L10n.daysAgo(count), endLabel: L10n.today.lowercased())
         }
     }
 
@@ -1259,7 +1259,7 @@ final class Library: ObservableObject {
     func backUp(_ sessions: [SessionRecord]) {
         let done = sessions.filter(Retention.backUp).count
         countBackups()
-        show(notice: done == 0 ? "Yedeklenemedi" : "\(done) sohbet yedeklendi")
+        show(notice: done == 0 ? L10n.backupFailed : L10n.backedUpChats(done))
     }
 
     /// Counts what is in the backups folder, for Settings.
@@ -1295,13 +1295,13 @@ final class Library: ObservableObject {
             return
         }
         guard let shortcut = Shortcut(event: event) else {
-            show(notice: "Kısayolda ⌘, ⌥ veya ⌃ olmalı")
+            show(notice: L10n.shortcutNeedsModifier)
             return
         }
         recordingShortcut = false
         guard let hotKey else { return }
         if !hotKey.change(to: shortcut) {
-            show(notice: "\(shortcut.label) kullanılamıyor, başka bir uygulamada")
+            show(notice: L10n.shortcutTaken(shortcut.label))
         }
         shortcutLabel = hotKey.isRegistered ? hotKey.shortcut.label : ""
     }
@@ -1437,7 +1437,7 @@ final class Library: ObservableObject {
             do {
                 try work(self.userDB)
             } catch {
-                DispatchQueue.main.async { self.show(notice: "Kaydedilemedi") }
+                DispatchQueue.main.async { self.show(notice: L10n.couldNotSave) }
             }
             self.reload()
         }
@@ -1447,11 +1447,7 @@ final class Library: ObservableObject {
 
     /// Fills the pinned section with sample tasks for screenshots. Nothing is written to disk.
     func applyPreviewPins() {
-        let samples = [
-            ["Staging ortamında dene", "Hata mesajlarını gözden geçir"],
-            [],
-            ["Sonuçları ekiple paylaş"],
-        ]
+        let samples = L10n.previewTasks
         let candidates = Array(recent.filter(\.hasCustomTitle).prefix(samples.count))
         var nextID: Int64 = 1
         pinned = zip(candidates, samples).map { session, texts in
