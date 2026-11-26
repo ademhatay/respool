@@ -1,6 +1,6 @@
 import ServiceManagement
 
-/// Starts Raf when you log in, through the system's own login items list.
+/// Starts Respool when you log in, through the system's own login items list.
 enum LoginItem {
     static var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled

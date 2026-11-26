@@ -1,6 +1,6 @@
 import AppKit
 
-/// Hands a session back to Claude. Raf never edits transcripts; it only asks Claude to resume them.
+/// Hands a session back to Claude. Respool never edits transcripts; it only asks Claude to resume them.
 enum Opener {
     static let claudePath: String? = {
         let home = Paths.home.path

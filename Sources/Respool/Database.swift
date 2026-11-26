@@ -201,13 +201,13 @@ enum Paths {
 
     static let support: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let url = base.appendingPathComponent("Raf", isDirectory: true)
+        let url = base.appendingPathComponent("Respool", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }()
 
-    /// `RAF_DB` points the app at another index file, which the self-test uses.
+    /// `RESPOOL_DB` points the app at another index file, which the self-test uses.
     static var database: String {
-        ProcessInfo.processInfo.environment["RAF_DB"] ?? support.appendingPathComponent("raf.db").path
+        ProcessInfo.processInfo.environment["RESPOOL_DB"] ?? support.appendingPathComponent("respool.db").path
     }
 }

@@ -74,9 +74,9 @@ final class Library: ObservableObject {
     private let readDB: Database
     private let userDB: Database
     private let indexDB: Database
-    private let readQueue = DispatchQueue(label: "raf.read", qos: .userInitiated)
-    private let userQueue = DispatchQueue(label: "raf.user", qos: .userInitiated)
-    private let indexQueue = DispatchQueue(label: "raf.index", qos: .utility)
+    private let readQueue = DispatchQueue(label: "respool.read", qos: .userInitiated)
+    private let userQueue = DispatchQueue(label: "respool.user", qos: .userInitiated)
+    private let indexQueue = DispatchQueue(label: "respool.index", qos: .utility)
 
     private var allSessions: [String: SessionRecord] = [:]
     private var desktop = DesktopSessions.Index()

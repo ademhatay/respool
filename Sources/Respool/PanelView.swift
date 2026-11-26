@@ -67,7 +67,7 @@ struct PanelView: View {
                 Button("Yeni etiket…") { library.tagEditor = TagEditor() }
                 Button("Ayarlar…") { library.showingSettings = true }
                 Divider()
-                Button("Raf'tan çık") { NSApp.terminate(nil) }
+                Button("Respool'dan çık") { NSApp.terminate(nil) }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .medium))

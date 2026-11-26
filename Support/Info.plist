@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Raf</string>
+    <string>Respool</string>
     <key>CFBundleDisplayName</key>
-    <string>Raf</string>
+    <string>Respool</string>
     <key>CFBundleIdentifier</key>
-    <string>app.raf.Raf</string>
+    <string>io.github.ademhatay.respool</string>
     <key>CFBundleExecutable</key>
-    <string>Raf</string>
+    <string>Respool</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

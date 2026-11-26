@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Raf",
+    name: "Respool",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "Raf",
-            path: "Sources/Raf",
+            name: "Respool",
+            path: "Sources/Respool",
             linkerSettings: [.linkedLibrary("sqlite3")]
         )
     ]

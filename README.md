@@ -1,4 +1,4 @@
-# Raf
+# Respool
 
 Claude Code sohbetleriniz için ekranın sağ kenarından açılan bir panel. Bütün projelerinizdeki
 sohbetleri tek yerde gösterir, içlerinde arar ve tıklayınca sohbeti bulunduğu yerde açar.
@@ -14,7 +14,7 @@ sohbetleri tek yerde gösterir, içlerinde arar ve tıklayınca sohbeti bulundu�
 - **Hesaplar.** Ayarlar'dan açılır, varsayılan olarak kapalıdır. Birden fazla organizasyonunuz
   varsa üstteki seçiciyle listeyi birine daraltın.
   Claude uygulamasının o an açık olmayan organizasyonundaki bir sohbet oradan açılamaz;
-  Raf bunu söyler, hesabı Claude'da siz değiştirirsiniz.
+  Respool bunu söyler, hesabı Claude'da siz değiştirirsiniz.
 - **Canlı durum.** Açık sohbetlerde Claude çalışıyorsa bir gösterge, sıra sizdeyse bir nokta görünür.
 - **Açma.** Claude uygulamasındaki sohbet orada açılır. Terminalde açık olan sohbetin terminali
   öne gelir. Kapalı bir terminal sohbeti yeni bir terminalde sürdürülür.
@@ -37,15 +37,15 @@ Diğer işlemler sağ tık menüsünde.
 ./scripts/install.sh
 ```
 
-Bu komut uygulamayı derler, `/Applications/Raf.app` konumuna kopyalar ve başlatır. Yalnızca
-derlemek için `./scripts/bundle.sh` çalıştırın; sonuç `build/Raf.app` içinde olur. Kısayol,
+Bu komut uygulamayı derler, `/Applications/Respool.app` konumuna kopyalar ve başlatır. Yalnızca
+derlemek için `./scripts/bundle.sh` çalıştırın; sonuç `build/Respool.app` içinde olur. Kısayol,
 girişte başlatma ve hesap seçici panelin `…` menüsündeki Ayarlar sayfasındadır.
 
 macOS 14 ve üstü, Xcode komut satırı araçları gerekir.
 
 ## Veriler
 
-Raf, Claude Code dosyalarını yalnızca okur; hiçbirini değiştirmez.
+Respool, Claude Code dosyalarını yalnızca okur; hiçbirini değiştirmez.
 
 | Kaynak | Ne için |
 |---|---|
@@ -53,13 +53,13 @@ Raf, Claude Code dosyalarını yalnızca okur; hiçbirini değiştirmez.
 | `~/.claude/sessions/*.json` | Hangi sohbetin şu an açık olduğu ve durumu |
 | `~/Library/Application Support/Claude/claude-code-sessions` | Claude uygulamasındaki sohbetin bağlantısı |
 
-Bu dosyaların biçimi Claude Code'a aittir ve sürümler arasında değişebilir; Raf 2.1.332 ile denendi.
-Dizin, sabitlemeler ve görevler `~/Library/Application Support/Raf/raf.db` içinde durur.
+Bu dosyaların biçimi Claude Code'a aittir ve sürümler arasında değişebilir; Respool 2.1.332 ile denendi.
+Dizin, sabitlemeler ve görevler `~/Library/Application Support/Respool/respool.db` içinde durur.
 
 ## Geliştirme araçları
 
 ```bash
-.build/release/Raf --index --query "aranan ifade"          # dizini güncelle, aramayı dene
-.build/release/Raf --snapshot panel.png --dark             # paneli bir görüntüye çiz
-RAF_DB=/tmp/test.db .build/release/Raf --selftest          # sabitleme ve görev testleri
+.build/release/Respool --index --query "aranan ifade"          # dizini güncelle, aramayı dene
+.build/release/Respool --snapshot panel.png --dark             # paneli bir görüntüye çiz
+RESPOOL_DB=/tmp/test.db .build/release/Respool --selftest          # sabitleme ve görev testleri
 ```

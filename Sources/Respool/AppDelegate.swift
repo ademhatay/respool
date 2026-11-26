@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             library = try Library()
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Raf başlatılamadı"
+            alert.messageText = "Respool başlatılamadı"
             alert.informativeText = "Dizin dosyası açılamadı: \(error)"
             alert.runModal()
             NSApp.terminate(nil)
@@ -87,11 +87,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Raf")
+            button.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Respool")
             button.target = self
             button.action = #selector(statusItemClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.toolTip = "Raf"
+            button.toolTip = "Respool"
         }
         statusItem = item
     }
@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Raf'tan çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Respool'dan çık", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil

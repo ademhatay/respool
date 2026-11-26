@@ -48,7 +48,7 @@ if let output = value(after: "--snapshot") {
     do {
         let library = try Library()
         library.reloadSync()
-        if arguments.contains("--seed-tags"), ProcessInfo.processInfo.environment["RAF_DB"] != nil {
+        if arguments.contains("--seed-tags"), ProcessInfo.processInfo.environment["RESPOOL_DB"] != nil {
             // Writes sample tags, so it only runs against a throwaway index.
             let samples = [("acil", 0), ("müşteri", 4), ("araştırma", 5)]
             for (offset, sample) in samples.enumerated() where offset < library.recent.count {
@@ -95,7 +95,7 @@ if let mode = value(after: "--login-item") {
 }
 
 if arguments.contains("--selftest") {
-    // Developer mode: exercise pins, tasks and project edits against the index named by RAF_DB.
+    // Developer mode: exercise pins, tasks and project edits against the index named by RESPOOL_DB.
     func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.4)) }
     func check(_ name: String, _ passed: Bool) {
         print("\(passed ? "ok  " : "FAIL") \(name)")

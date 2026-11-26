@@ -97,7 +97,7 @@ final class HotKey {
     @discardableResult
     func register() -> Bool {
         unregister()
-        let identifier = EventHotKeyID(signature: OSType(0x5241_4621), id: 1)
+        let identifier = EventHotKeyID(signature: OSType(0x5253_504C), id: 1)
         let status = RegisterEventHotKey(
             UInt32(shortcut.keyCode), UInt32(shortcut.modifiers), identifier,
             GetApplicationEventTarget(), 0, &hotKeyRef
