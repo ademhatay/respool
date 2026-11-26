@@ -59,6 +59,12 @@ if let output = value(after: "--snapshot") {
             if arguments.contains("--filter-tag") { library.tagFilter = library.tags.first?.id }
             library.reloadSync()
         }
+        if arguments.contains("--settings") {
+            library.shortcutLabel = Shortcut.standard.label
+            library.showsOrganizations = arguments.contains("--accounts")
+            library.reloadSync()
+            library.showingSettings = true
+        }
         if arguments.contains("--preview-pins") { library.applyPreviewPins() }
         if let expand = value(after: "--expand") {
             library.expanded = Set(library.projects.filter { $0.name == expand }.map(\.key))
@@ -144,6 +150,9 @@ if arguments.contains("--selftest") {
         library.delete(library.tags[0]); settle()
         check("tag deleted clears filter", library.tags.isEmpty && library.tagFilter == nil && library.tagged == nil)
 
+        check("organization names stay hidden by default", !library.projects.flatMap(\.sessions).contains { $0.organizationName != nil })
+        library.showsOrganizations = true; settle()
+        check("organization names appear when enabled", library.projects.flatMap(\.sessions).contains { $0.organizationName != nil })
         if let organization = library.organizations.last, library.organizations.count > 1 {
             let everything = library.sessionCount
             library.organizationFilter = organization.id; settle()
@@ -154,8 +163,8 @@ if arguments.contains("--selftest") {
             check("no session from another organization", !foreign)
             library.rename(organization, to: "Takım"); settle()
             check("organization renamed", library.organizations.contains { $0.name == "Takım" })
-            library.organizationFilter = nil; settle()
-            check("filter cleared", library.sessionCount == everything)
+            library.showsOrganizations = false; settle()
+            check("turning accounts off clears the filter", library.organizationFilter == nil && library.sessionCount == everything)
         }
 
         library.togglePin(session); settle()

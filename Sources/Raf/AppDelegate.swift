@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         library.onOpen = { [weak controller, weak library] session in
             guard let library else { return }
             if library.isInOtherOrganization(session.id) {
-                library.show(notice: "\(session.organizationName ?? "Diğer hesap") hesabında. Claude'da hesabı değiştirin.")
+                library.show(notice: Self.otherOrganizationNotice(for: session))
                 return
             }
             controller?.hide()
@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             if library.isInOtherOrganization(session.id) {
-                library.show(notice: "\(session.organizationName ?? "Diğer hesap") hesabında. Claude'da hesabı değiştirin.")
+                library.show(notice: Self.otherOrganizationNotice(for: session))
                 return
             }
             controller?.hide()
@@ -59,11 +59,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         installStatusItem()
         let hotKey = HotKey { [weak controller] in controller?.toggle() }
-        if !hotKey.isRegistered { library.shortcutLabel = "" }
+        library.hotKey = hotKey
         self.hotKey = hotKey
 
         library.reload()
         controller.show()
+    }
+
+    private static func otherOrganizationNotice(for session: SessionRecord) -> String {
+        if let name = session.organizationName {
+            return "\(name) hesabında. Claude'da hesabı değiştirin."
+        }
+        return "Başka bir hesapta. Claude'da hesabı değiştirin."
     }
 
     /// Opening the app again (from Finder or Spotlight) brings the panel up.
@@ -84,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
             button.action = #selector(statusItemClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.toolTip = "Raf (\(HotKey.displayName))"
+            button.toolTip = "Raf"
         }
         statusItem = item
     }

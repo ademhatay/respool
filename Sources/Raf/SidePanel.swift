@@ -128,6 +128,10 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     private func handle(_ event: NSEvent) -> NSEvent? {
         guard isShown, event.window === panel else { return event }
+        if library.recordingShortcut {
+            library.captureShortcut(event)
+            return nil
+        }
         switch Int(event.keyCode) {
         case 53: // escape
             if library.handleEscape() { hide() }

@@ -11,7 +11,8 @@ sohbetleri tek yerde gösterir, içlerinde arar ve tıklayınca sohbeti bulundu�
 - **Sabitleme ve görevler.** Sık döndüğünüz sohbetleri sabitleyin; her birine yapılacaklar ekleyin.
 - **Etiketler.** Sohbetlere renkli etiket verin; aramanın altındaki etikete tıklayınca yalnızca
   o etiketteki sohbetler listelenir.
-- **Hesaplar.** Birden fazla organizasyonunuz varsa üstteki seçiciyle listeyi birine daraltın.
+- **Hesaplar.** Ayarlar'dan açılır, varsayılan olarak kapalıdır. Birden fazla organizasyonunuz
+  varsa üstteki seçiciyle listeyi birine daraltın.
   Claude uygulamasının o an açık olmayan organizasyonundaki bir sohbet oradan açılamaz;
   Raf bunu söyler, hesabı Claude'da siz değiştirirsiniz.
 - **Canlı durum.** Açık sohbetlerde Claude çalışıyorsa bir gösterge, sıra sizdeyse bir nokta görünür.
@@ -22,7 +23,7 @@ sohbetleri tek yerde gösterir, içlerinde arar ve tıklayınca sohbeti bulundu�
 
 | Tuş | İşlev |
 |---|---|
-| `⌥⇧Space` | Paneli aç veya kapat |
+| `⌥⇧Space` | Paneli aç veya kapat (Ayarlar'dan değiştirilebilir) |
 | `↑` `↓` | Sohbetler arasında gez |
 | `↩` | Seçili sohbeti aç |
 | `esc` | Aramayı temizle, sonra paneli kapat |
@@ -37,8 +38,8 @@ Diğer işlemler sağ tık menüsünde.
 ```
 
 Bu komut uygulamayı derler, `/Applications/Raf.app` konumuna kopyalar ve başlatır. Yalnızca
-derlemek için `./scripts/bundle.sh` çalıştırın; sonuç `build/Raf.app` içinde olur. Girişte
-başlatmayı panelin `…` menüsünden açıp kapatabilirsiniz.
+derlemek için `./scripts/bundle.sh` çalıştırın; sonuç `build/Raf.app` içinde olur. Kısayol,
+girişte başlatma ve hesap seçici panelin `…` menüsündeki Ayarlar sayfasındadır.
 
 macOS 14 ve üstü, Xcode komut satırı araçları gerekir.
 

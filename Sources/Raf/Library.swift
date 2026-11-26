@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Combine
 
@@ -41,7 +42,17 @@ final class Library: ObservableObject {
         didSet { if tagFilter != oldValue { reload() } }
     }
     @Published var tagEditor: TagEditor?
-    @Published var editingOrganizations = false
+    @Published var showingSettings = false
+    @Published private(set) var recordingShortcut = false
+    /// Off by default: most people have one organization and do not need the switcher.
+    @Published var showsOrganizations: Bool {
+        didSet {
+            guard showsOrganizations != oldValue else { return }
+            UserDefaults.standard.set(showsOrganizations, forKey: "showsOrganizations")
+            if !showsOrganizations { organizationFilter = nil }
+            reload()
+        }
+    }
     @Published var expanded: Set<String> {
         didSet { UserDefaults.standard.set(Array(expanded), forKey: "expandedProjects") }
     }
@@ -50,7 +61,10 @@ final class Library: ObservableObject {
     @Published var renamingProject: String?
     @Published var focusRequest = 0
     /// Empty when the global shortcut could not be registered (another app owns it).
-    @Published var shortcutLabel = HotKey.displayName
+    @Published var shortcutLabel = ""
+    var hotKey: HotKey? {
+        didSet { shortcutLabel = hotKey?.isRegistered == true ? hotKey!.shortcut.label : "" }
+    }
     @Published private(set) var launchesAtLogin = LoginItem.isEnabled
 
     var searchFocused = true
@@ -76,7 +90,8 @@ final class Library: ObservableObject {
         readDB = try Database(path: Paths.database)
         userDB = try Database(path: Paths.database)
         expanded = Set(UserDefaults.standard.stringArray(forKey: "expandedProjects") ?? [])
-        organizationFilter = UserDefaults.standard.string(forKey: "organizationFilter")
+        showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
+        organizationFilter = showsOrganizations ? UserDefaults.standard.string(forKey: "organizationFilter") : nil
     }
 
     // MARK: - Loading
@@ -94,10 +109,10 @@ final class Library: ObservableObject {
     }
 
     func reload() {
-        let organization = organizationFilter, tag = tagFilter
+        let organization = organizationFilter, tag = tagFilter, named = showsOrganizations
         readQueue.async { [weak self] in
             guard let self else { return }
-            let snapshot = self.buildSnapshot(organization: organization, tag: tag)
+            let snapshot = self.buildSnapshot(organization: organization, tag: tag, namesOrganizations: named)
             DispatchQueue.main.async {
                 // A filter changed while this was loading; a newer reload is already on its way.
                 guard organization == self.organizationFilter, tag == self.tagFilter else { return }
@@ -107,7 +122,7 @@ final class Library: ObservableObject {
     }
 
     func reloadSync() {
-        apply(buildSnapshot(organization: organizationFilter, tag: tagFilter))
+        apply(buildSnapshot(organization: organizationFilter, tag: tagFilter, namesOrganizations: showsOrganizations))
     }
 
     private func apply(_ snapshot: Snapshot) {
@@ -129,7 +144,9 @@ final class Library: ObservableObject {
         if results != nil { scheduleSearch(immediately: true) }
     }
 
-    private func buildSnapshot(organization organizationFilter: String?, tag tagFilter: Int64?) -> Snapshot {
+    private func buildSnapshot(
+        organization organizationFilter: String?, tag tagFilter: Int64?, namesOrganizations: Bool
+    ) -> Snapshot {
         var identities: [String: (key: String, name: String)] = [:]
         try? readDB.query("SELECT cwd, key, name FROM cwd_projects") { row in
             if let cwd = row.text(0), let key = row.text(1), let name = row.text(2) {
@@ -234,7 +251,7 @@ final class Library: ObservableObject {
         let organizationNames = Dictionary(uniqueKeysWithValues: snapshot.organizations.map { ($0.id, $0.name) })
         for index in ordered.indices {
             guard let id = ordered[index].organizationID else { continue }
-            ordered[index].organizationName = organizationNames[id]
+            if namesOrganizations { ordered[index].organizationName = organizationNames[id] }
             ordered[index].inOtherOrganization = currentOrganization != nil && id != currentOrganization
                 && snapshot.live[ordered[index].id] == nil
         }
@@ -437,6 +454,7 @@ final class Library: ObservableObject {
     }
 
     func moveSelection(_ delta: Int) {
+        guard !showingSettings else { return }
         let keys = visibleKeys
         guard !keys.isEmpty else { return }
         guard let selection, let index = keys.firstIndex(of: selection) else {
@@ -448,7 +466,7 @@ final class Library: ObservableObject {
 
     @discardableResult
     func openSelection() -> Bool {
-        guard let selection, let session = allSessions[RowKey.sessionID(selection)] else { return false }
+        guard !showingSettings, let selection, let session = allSessions[RowKey.sessionID(selection)] else { return false }
         onOpen?(session)
         return true
     }
@@ -492,9 +510,13 @@ final class Library: ObservableObject {
             focusRequest += 1
             return false
         }
-        if tagEditor != nil || editingOrganizations {
+        if tagEditor != nil {
             tagEditor = nil
-            editingOrganizations = false
+            focusRequest += 1
+            return false
+        }
+        if showingSettings {
+            showingSettings = false
             focusRequest += 1
             return false
         }
@@ -515,7 +537,8 @@ final class Library: ObservableObject {
         addingTaskFor = nil
         renamingProject = nil
         tagEditor = nil
-        editingOrganizations = false
+        showingSettings = false
+        cancelShortcutRecording()
         focusRequest += 1
         refresh()
     }
@@ -577,6 +600,39 @@ final class Library: ObservableObject {
 
     func delete(_ task: TaskItem) {
         write { db in try db.run("DELETE FROM tasks WHERE id = ?", [task.id]) }
+    }
+
+    // MARK: - Shortcut
+
+    /// Starts listening for the next key press, which becomes the new shortcut.
+    func beginShortcutRecording() {
+        hotKey?.unregister()
+        recordingShortcut = true
+    }
+
+    func cancelShortcutRecording() {
+        guard recordingShortcut else { return }
+        recordingShortcut = false
+        hotKey?.register()
+        shortcutLabel = hotKey?.isRegistered == true ? hotKey!.shortcut.label : ""
+    }
+
+    /// Handles a key press while recording. Escape cancels; a press without ⌘, ⌥ or ⌃ is refused.
+    func captureShortcut(_ event: NSEvent) {
+        if event.keyCode == 53 {
+            cancelShortcutRecording()
+            return
+        }
+        guard let shortcut = Shortcut(event: event) else {
+            show(notice: "Kısayolda ⌘, ⌥ veya ⌃ olmalı")
+            return
+        }
+        recordingShortcut = false
+        guard let hotKey else { return }
+        if !hotKey.change(to: shortcut) {
+            show(notice: "\(shortcut.label) kullanılamıyor, başka bir uygulamada")
+        }
+        shortcutLabel = hotKey.isRegistered ? hotKey.shortcut.label : ""
     }
 
     // MARK: - Tags

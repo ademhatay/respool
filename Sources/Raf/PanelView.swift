@@ -15,9 +15,13 @@ struct PanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchBar
-            filterBar
-            content
+            if library.showingSettings {
+                SettingsView(library: library, focus: $focus)
+            } else {
+                searchBar
+                filterBar
+                content
+            }
             footer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -61,13 +65,7 @@ struct PanelView: View {
             Menu {
                 Button("Yenile") { library.refresh() }
                 Button("Yeni etiket…") { library.tagEditor = TagEditor() }
-                if library.organizations.count > 1 {
-                    Button("Hesap adlarını düzenle") { library.editingOrganizations = true }
-                }
-                Toggle("Girişte başlat", isOn: Binding(
-                    get: { library.launchesAtLogin },
-                    set: { library.setLaunchesAtLogin($0) }
-                ))
+                Button("Ayarlar…") { library.showingSettings = true }
                 Divider()
                 Button("Raf'tan çık") { NSApp.terminate(nil) }
             } label: {
@@ -94,23 +92,19 @@ struct PanelView: View {
     // MARK: - Filters
 
     @ViewBuilder private var filterBar: some View {
-        let showsOrganizations = library.organizations.count > 1
+        let showsOrganizations = library.showsOrganizations && library.organizations.count > 1
         let showsTags = library.tagEditor != nil || !library.tags.isEmpty
         if showsOrganizations || showsTags {
             VStack(alignment: .leading, spacing: 8) {
                 if showsOrganizations {
-                    if library.editingOrganizations {
-                        OrganizationEditor(library: library, focus: $focus)
-                    } else {
-                        Picker("Hesap", selection: $library.organizationFilter) {
-                            Text("Tümü").tag(String?.none)
-                            ForEach(library.organizations) { organization in
-                                Text(shortened(organization.name)).tag(String?.some(organization.id))
-                            }
+                    Picker("Hesap", selection: $library.organizationFilter) {
+                        Text("Tümü").tag(String?.none)
+                        ForEach(library.organizations) { organization in
+                            Text(shortened(organization.name)).tag(String?.some(organization.id))
                         }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
                 if library.tagEditor != nil {
                     TagEditorRow(library: library, focus: $focus)
@@ -763,15 +757,19 @@ struct OrganizationEditor: View {
                 .frame(height: 30)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
             }
-            HStack {
-                Spacer()
-                Button("Bitti", action: save)
-                    .controlSize(.small)
+            if hasChanges {
+                HStack {
+                    Spacer()
+                    Button("Adları kaydet", action: save)
+                        .controlSize(.small)
+                }
             }
         }
-        .onAppear {
-            guard let first = library.organizations.first else { return }
-            DispatchQueue.main.async { focus.wrappedValue = .organization(first.id) }
+    }
+
+    private var hasChanges: Bool {
+        library.organizations.contains { organization in
+            drafts[organization.id].map { $0 != organization.name } ?? false
         }
     }
 
@@ -779,8 +777,157 @@ struct OrganizationEditor: View {
         for organization in library.organizations {
             if let draft = drafts[organization.id] { library.rename(organization, to: draft) }
         }
-        library.editingOrganizations = false
-        library.focusRequest += 1
+        drafts = [:]
+        focus.wrappedValue = nil
+    }
+}
+
+// MARK: - Settings
+
+struct SettingsView: View {
+    @ObservedObject var library: Library
+    var focus: FocusState<PanelField?>.Binding
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Button {
+                    library.cancelShortcutRecording()
+                    library.showingSettings = false
+                    library.focusRequest += 1
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Geri")
+                Text("Ayarlar")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    SettingsGroup(note: "Paneli her yerden açıp kapatır. Değiştirmek için tıklayın, sonra yeni tuşlara basın.") {
+                        SettingsRow(title: "Kısayol") { shortcutButton }
+                    }
+                    SettingsGroup(note: nil) {
+                        SettingsRow(title: "Girişte başlat") {
+                            Toggle("", isOn: Binding(
+                                get: { library.launchesAtLogin },
+                                set: { library.setLaunchesAtLogin($0) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                        }
+                    }
+                    SettingsGroup(note: "Birden fazla Claude organizasyonu kullanıyorsanız, listeyi birine daraltan bir seçici gösterir.") {
+                        SettingsRow(title: "Hesapları göster") {
+                            Toggle("", isOn: $library.showsOrganizations)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                        }
+                    }
+                    if library.showsOrganizations {
+                        if library.organizations.count > 1 {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Hesap adları")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 4)
+                                OrganizationEditor(library: library, focus: focus)
+                            }
+                        } else {
+                            Text("Bu bilgisayarda tek bir organizasyonun sohbetleri var; seçici görünmeyecek.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 16)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var shortcutButton: some View {
+        Button {
+            if library.recordingShortcut {
+                library.cancelShortcutRecording()
+            } else {
+                library.beginShortcutRecording()
+            }
+        } label: {
+            Text(shortcutText)
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(library.recordingShortcut ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.primary))
+                .padding(.horizontal, 10)
+                .frame(minWidth: 96, minHeight: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(library.recordingShortcut ? 0.04 : 0.09))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(library.recordingShortcut ? 0.8 : 0), lineWidth: 1.5)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(library.recordingShortcut ? "Vazgeçmek için esc" : "Kısayolu değiştir")
+    }
+
+    private var shortcutText: String {
+        if library.recordingShortcut { return "Tuşlara basın…" }
+        return library.shortcutLabel.isEmpty ? "Atanmadı" : library.shortcutLabel
+    }
+}
+
+/// One rounded block of settings rows with an optional explanation underneath.
+struct SettingsGroup<Content: View>: View {
+    let note: String?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            content
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
+            if let note {
+                Text(note)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
+}
+
+struct SettingsRow<Control: View>: View {
+    let title: String
+    @ViewBuilder var control: Control
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 13))
+            Spacer(minLength: 8)
+            control
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 40)
     }
 }
 
