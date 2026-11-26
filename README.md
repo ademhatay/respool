@@ -1,65 +1,87 @@
+<p align="center"><img src="docs/icon.png" width="128" alt="Respool icon"></p>
+
 # Respool
 
-Claude Code sohbetleriniz için ekranın sağ kenarından açılan bir panel. Bütün projelerinizdeki
-sohbetleri tek yerde gösterir, içlerinde arar ve tıklayınca sohbeti bulunduğu yerde açar.
+A side panel for your Claude Code sessions on macOS. It slides in from the right edge of the
+screen, lists every session from every project on your Mac, searches inside them, and takes
+you back to the one you pick.
 
-## Ne yapar
+Respool is an independent project and is not affiliated with Anthropic.
 
-- **Arama.** Sohbet adlarında ve konuşmaların içinde arar; eşleşen yerden bir alıntı gösterir.
-- **Projeler.** Aynı deponun farklı klasörlerdeki kopyalarını tek proje altında toplar
-  (git remote adresine göre). Projeleri elle birleştirebilir ve yeniden adlandırabilirsiniz.
-- **Sabitleme ve görevler.** Sık döndüğünüz sohbetleri sabitleyin; her birine yapılacaklar ekleyin.
-- **Etiketler.** Sohbetlere renkli etiket verin; aramanın altındaki etikete tıklayınca yalnızca
-  o etiketteki sohbetler listelenir.
-- **Hesaplar.** Ayarlar'dan açılır, varsayılan olarak kapalıdır. Birden fazla organizasyonunuz
-  varsa üstteki seçiciyle listeyi birine daraltın.
-  Claude uygulamasının o an açık olmayan organizasyonundaki bir sohbet oradan açılamaz;
-  Respool bunu söyler, hesabı Claude'da siz değiştirirsiniz.
-- **Canlı durum.** Açık sohbetlerde Claude çalışıyorsa bir gösterge, sıra sizdeyse bir nokta görünür.
-- **Açma.** Claude uygulamasındaki sohbet orada açılır. Terminalde açık olan sohbetin terminali
-  öne gelir. Kapalı bir terminal sohbeti yeni bir terminalde sürdürülür.
+> The interface is in Turkish for now. An English localization is planned.
 
-## Kullanım
+## What it does
 
-| Tuş | İşlev |
+- **Search.** Searches session titles and the conversations themselves, and shows an excerpt
+  of the match.
+- **Projects.** Groups sessions by git remote, so one repository checked out in several
+  folders shows up as one project. Projects can be merged and renamed by hand.
+- **Pins and tasks.** Pin the sessions you keep returning to and keep a short task list on each.
+- **Tags.** Give sessions colored tags and filter the list by tag.
+- **Live status.** Shows which sessions are running, and whether Claude is working or waiting
+  for you.
+- **Details on hover.** Rest the pointer on a session or project to see token usage, context
+  size, transcript size, model, branch and folder.
+- **Opening.** A session opens where it lives: in the Claude desktop app, by bringing its
+  terminal forward, or by resuming it in a new terminal.
+- **Accounts.** Optional. If you use several Claude organizations, a switcher narrows the list
+  to one of them.
+
+## Keys
+
+| Key | Action |
 |---|---|
-| `⌥⇧Space` | Paneli aç veya kapat (Ayarlar'dan değiştirilebilir) |
-| `↑` `↓` | Sohbetler arasında gez |
-| `↩` | Seçili sohbeti aç |
-| `esc` | Aramayı temizle, sonra paneli kapat |
+| `⌥⇧Space` | Open or close the panel (change it in Settings) |
+| `↑` `↓` | Move through sessions |
+| `↩` | Open the selected session |
+| `esc` | Clear the search, then close the panel |
 
-Bir sohbetin üzerine gelince sabitleme düğmesi, sabitlenmiş sohbette görev ekleme düğmesi çıkar.
-Diğer işlemler sağ tık menüsünde.
+Hover a session for the pin button; everything else is in its context menu.
 
-## Derleme
+## Install
+
+Requires macOS 14 or later and the Xcode command line tools.
 
 ```bash
+git clone https://github.com/ademhatay/respool.git
+cd respool
 ./scripts/install.sh
 ```
 
-Bu komut uygulamayı derler, `/Applications/Respool.app` konumuna kopyalar ve başlatır. Yalnızca
-derlemek için `./scripts/bundle.sh` çalıştırın; sonuç `build/Respool.app` içinde olur. Kısayol,
-girişte başlatma ve hesap seçici panelin `…` menüsündeki Ayarlar sayfasındadır.
+This builds the app, copies it to `/Applications/Respool.app` and starts it. To build without
+installing, run `./scripts/bundle.sh`; the app lands in `build/Respool.app`.
 
-macOS 14 ve üstü, Xcode komut satırı araçları gerekir.
+## Your data
 
-## Veriler
+Respool only reads Claude Code's files. It never changes them, and nothing leaves your Mac.
 
-Respool, Claude Code dosyalarını yalnızca okur; hiçbirini değiştirmez.
-
-| Kaynak | Ne için |
+| Source | Used for |
 |---|---|
-| `~/.claude/projects/**/*.jsonl` | Sohbet adları, tarihleri ve aranabilir metin |
-| `~/.claude/sessions/*.json` | Hangi sohbetin şu an açık olduğu ve durumu |
-| `~/Library/Application Support/Claude/claude-code-sessions` | Claude uygulamasındaki sohbetin bağlantısı |
+| `~/.claude/projects/**/*.jsonl` | Titles, dates, token usage and searchable text |
+| `~/.claude/sessions/*.json` | Which sessions are running, and their state |
+| `~/.claude.json` | The name of the organization you are signed in to |
+| `~/Library/Application Support/Claude/claude-code-sessions` | Links to sessions in the desktop app |
 
-Bu dosyaların biçimi Claude Code'a aittir ve sürümler arasında değişebilir; Respool 2.1.332 ile denendi.
-Dizin, sabitlemeler ve görevler `~/Library/Application Support/Respool/respool.db` içinde durur.
+These formats belong to Claude Code and can change between versions; Respool was written
+against Claude Code 2.1.332. The index, pins, tasks and tags live in
+`~/Library/Application Support/Respool/respool.db`.
 
-## Geliştirme araçları
+## Limits
+
+- A session that belongs to an organization the desktop app is not signed in to cannot be
+  opened there. Respool says so; switch organization in the Claude app first.
+- Token counts cover the main conversation, not subagents.
+- Lines longer than 512 KB in a transcript are skipped by the indexer.
+
+## Development
 
 ```bash
-.build/release/Respool --index --query "aranan ifade"          # dizini güncelle, aramayı dene
-.build/release/Respool --snapshot panel.png --dark             # paneli bir görüntüye çiz
-RESPOOL_DB=/tmp/test.db .build/release/Respool --selftest          # sabitleme ve görev testleri
+.build/release/Respool --index --query "some phrase"       # update the index and try a search
+.build/release/Respool --snapshot panel.png --dark         # draw the panel to an image
+RESPOOL_DB=/tmp/test.db .build/release/Respool --selftest  # pins, tasks, tags and filters
+swift scripts/make-icon.swift                              # regenerate the app icon
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
