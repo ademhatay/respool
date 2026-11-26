@@ -124,6 +124,10 @@ if let output = value(after: "--snapshot") {
         if let name = value(after: "--hide"), let project = library.allProjects.first(where: { $0.name == name }) {
             library.hide(project)
         }
+        if arguments.contains("--open-days") {
+            // Opens every day of the week summary, where only today is open by default.
+            for day in library.week { library.dayFold[day.day] = true }
+        }
         library.reloadSync()
         if arguments.contains("--settings") {
             library.shortcutLabel = Shortcut.standard.label
@@ -389,6 +393,46 @@ if arguments.contains("--selftest") {
         library.unhide(target); settle()
         check("a hidden project can be brought back",
               library.projects.contains { $0.key == target.key } && library.hiddenProjectList.isEmpty)
+
+        // The week summary, checked against the prompts in the index.
+        guard let monday = Library.calendar.dateInterval(of: .weekOfYear, for: Date())?.start else {
+            print("FAIL no week found for today")
+            exit(1)
+        }
+        let mondayKey = Format.dayKey(monday)
+        let index = try Database(path: Paths.database)
+        var typedThisWeek = 0
+        try index.query("SELECT count(*) FROM messages WHERE role = 'u' AND ts >= ?", [monday.timeIntervalSince1970]) {
+            typedThisWeek = $0.int(0)
+        }
+        check("the week counts every prompt since Monday", library.week.reduce(0) { $0 + $1.prompts } == typedThisWeek)
+        check("its days run from Monday to today, newest first",
+              library.week.allSatisfy { $0.day >= mondayKey && $0.day <= today }
+              && zip(library.week, library.week.dropFirst()).allSatisfy { $0.day > $1.day })
+        check("each day lists its sessions, the most used first",
+              library.week.allSatisfy { day in
+                  day.work.allSatisfy { $0.prompts > 0 }
+                      && zip(day.work, day.work.dropFirst()).allSatisfy { $0.prompts >= $1.prompts }
+              })
+        check("today starts open and the other days closed", library.isDayExpanded(today)
+              && library.week.filter { $0.day != today }.allSatisfy { !library.isDayExpanded($0.day) })
+        if let day = library.week.first {
+            library.toggleDay(day.day)
+            check("a day of the week opens and closes", library.isDayExpanded(day.day) != (day.day == today))
+            library.dayFold[day.day] = true
+            for section in [PanelSection.recent, PanelSection.week] where library.isCollapsed(section) {
+                library.toggleSection(section)
+            }
+            if let last = library.recent.last, let first = day.work.first {
+                library.selection = RowKey.recent(last.id)
+                library.moveSelection(1)
+                check("keyboard navigation walks from the recents into the week",
+                      library.selection == RowKey.day(day.day, first.id))
+            }
+        }
+        check("a day's row still names its session", RowKey.sessionID(RowKey.day(today, "abc")) == "abc")
+        library.dayFold = [:]
+        library.selection = nil
 
         // Dragging to reorder. A day of its own keeps these tasks away from the ones above.
         let far = Format.dayKey(Date().addingTimeInterval(10 * 86_400))

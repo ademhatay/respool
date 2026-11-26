@@ -30,6 +30,9 @@ Respool is an independent project and is not affiliated with Anthropic.
   project's folder with the task as its first prompt. A task's own context menu sets its day,
   moves it to a project, or deletes it.
 - **Tags.** Give sessions colored tags and filter the list by tag.
+- **Week.** A summary of the week so far: a row for each day with the sessions used that day and
+  how many prompts went into each. A day opens onto its sessions; today is open to begin with.
+  The summary can be turned off in Settings.
 - **Notifications.** When a session finishes or starts waiting for you, Respool posts a
   notification and shows a count next to its menu bar icon. Clicking the notification opens
   the session.

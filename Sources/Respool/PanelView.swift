@@ -204,6 +204,8 @@ struct PanelView: View {
             }
         }
 
+        WeekSection(library: library, focus: $focus)
+
         CollapsibleHeader(
             library: library, title: "Projeler",
             section: PanelSection.projects, count: library.projects.count
@@ -1125,6 +1127,79 @@ struct HeightReader: View {
     }
 }
 
+// MARK: - This week
+
+/// This week's work: a row for each day that had any, which opens onto the sessions used that day.
+struct WeekSection: View {
+    @ObservedObject var library: Library
+    var focus: FocusState<PanelField?>.Binding
+
+    var body: some View {
+        if library.showsWeek, !library.week.isEmpty {
+            CollapsibleHeader(
+                library: library, title: "Bu hafta",
+                section: PanelSection.week,
+                count: Set(library.week.flatMap(\.work).map(\.id)).count
+            )
+            if !library.isCollapsed(PanelSection.week) {
+                ForEach(library.week) { day in
+                    DayRow(library: library, day: day)
+                    if library.isDayExpanded(day.day) {
+                        ForEach(day.work) { work in
+                            SessionRow(
+                                library: library, session: work.session,
+                                rowKey: RowKey.day(day.day, work.id),
+                                detail: "\(work.session.placeLabel) · \(Format.count(work.prompts)) istem",
+                                inset: 16
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One day of the week: how many sessions were used, and how much was asked in them.
+struct DayRow: View {
+    @ObservedObject var library: Library
+    let day: DaySummary
+
+    @State private var hovering = false
+
+    var body: some View {
+        let expanded = library.isDayExpanded(day.day)
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { library.toggleDay(day.day) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .frame(width: 10)
+                Text(library.dayLabel(day.day))
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(day.work.count) sohbet · \(Format.count(day.prompts)) istem")
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(hovering ? 0.07 : 0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(expanded ? "Günün sohbetlerini gizle" : "Günün sohbetlerini göster")
+    }
+}
+
 // MARK: - Tags and organizations
 
 enum TagPalette {
@@ -1761,6 +1836,14 @@ struct SettingsView: View {
                     SettingsGroup {
                         SettingsRow(title: "Yapılacakları göster") {
                             Toggle("", isOn: $library.showsTodos)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                        }
+                    }
+                    SettingsGroup {
+                        SettingsRow(title: "Hafta özetini göster") {
+                            Toggle("", isOn: $library.showsWeek)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .controlSize(.small)

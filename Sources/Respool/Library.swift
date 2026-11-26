@@ -99,6 +99,13 @@ final class Library: ObservableObject {
     @Published var showsTodos: Bool {
         didSet { UserDefaults.standard.set(showsTodos, forKey: "showsTodos") }
     }
+    @Published var showsWeek = true {
+        didSet { UserDefaults.standard.set(showsWeek, forKey: "showsWeek") }
+    }
+    /// This week's work, one entry for each day that had any, today first.
+    @Published private(set) var week: [DaySummary] = []
+    /// Which days were opened or closed by hand. A day not named here is open when it is today.
+    @Published var dayFold: [String: Bool] = [:]
     @Published var notificationsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled") }
     }
@@ -162,6 +169,7 @@ final class Library: ObservableObject {
         expanded = Set(UserDefaults.standard.stringArray(forKey: "expandedProjects") ?? [])
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
         showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true
+        showsWeek = UserDefaults.standard.object(forKey: "showsWeek") as? Bool ?? true
         collapsedSections = Set(UserDefaults.standard.stringArray(forKey: "collapsedSections") ?? [])
         notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         organizationFilter = showsOrganizations ? UserDefaults.standard.string(forKey: "organizationFilter") : nil
@@ -186,6 +194,7 @@ final class Library: ObservableObject {
         var tasks: [TaskItem] = []
         var organizations: [Organization] = []
         var tagged: [SessionRecord]?
+        var week: [DaySummary] = []
     }
 
     /// How the project list is thinned and ordered. Read on the main thread before loading.
@@ -232,6 +241,7 @@ final class Library: ObservableObject {
         ingestLive(snapshot.live)
         tags = snapshot.tags
         tasks = snapshot.tasks
+        week = snapshot.week
         organizations = snapshot.organizations
         tagged = snapshot.tagged
         if let tagFilter, !snapshot.tags.contains(where: { $0.id == tagFilter }) { self.tagFilter = nil }
@@ -261,6 +271,35 @@ final class Library: ObservableObject {
                 return true
             }
             .sorted(by: arrangement.sort.areInOrder)
+    }
+
+    /// Which sessions were used on each day of the week that holds `now`, from Monday up to
+    /// that day. The timestamps of the prompts are all this needs; sessions of hidden projects
+    /// are left out, as they are everywhere else in the list.
+    private func week(of snapshot: Snapshot, until now: Date) -> [DaySummary] {
+        let calendar = Self.calendar
+        guard let monday = calendar.dateInterval(of: .weekOfYear, for: now)?.start else { return [] }
+        var promptsPerDay: [String: [String: Int]] = [:]
+        try? readDB.query("SELECT session_id, ts FROM messages WHERE role = 'u' AND ts >= ?", [monday.timeIntervalSince1970]) {
+            row in
+            guard let id = row.text(0), let stamp = row.double(1) else { return }
+            let key = Format.dayKey(Date(timeIntervalSince1970: stamp), in: calendar)
+            promptsPerDay[key, default: [:]][id, default: 0] += 1
+        }
+        let today = Format.dayKey(now, in: calendar)
+        var days: [DaySummary] = []
+        for offset in 0..<7 {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: monday) else { break }
+            let key = Format.dayKey(date, in: calendar)
+            if key > today { break }
+            let work = (promptsPerDay[key] ?? [:]).compactMap { id, prompts -> DayWork? in
+                guard let session = snapshot.sessions[id], !snapshot.hidden.contains(session.projectKey) else { return nil }
+                return DayWork(session: session, prompts: prompts)
+            }
+            .sorted { $0.prompts == $1.prompts ? $0.id < $1.id : $0.prompts > $1.prompts }
+            if !work.isEmpty { days.append(DaySummary(day: key, work: work)) }
+        }
+        return days.reversed()
     }
 
     private func buildSnapshot(
@@ -451,6 +490,7 @@ final class Library: ObservableObject {
             !pinnedSet.contains($0.id) && !snapshot.hidden.contains($0.projectKey)
         }.prefix(Self.recentCount))
         snapshot.projects = Self.arrange(snapshot.allProjects, by: arrangement, hidden: snapshot.hidden)
+        snapshot.week = week(of: snapshot, until: Date())
         return snapshot
     }
 
@@ -589,6 +629,9 @@ final class Library: ObservableObject {
         var keys: [String] = []
         if !isCollapsed(PanelSection.pinned) { keys += pinned.map { RowKey.pin($0.id) } }
         if !isCollapsed(PanelSection.recent) { keys += recent.map { RowKey.recent($0.id) } }
+        if showsWeek, !isCollapsed(PanelSection.week) {
+            for day in week where isDayExpanded(day.day) { keys += day.work.map { RowKey.day(day.day, $0.id) } }
+        }
         if !isCollapsed(PanelSection.projects) {
             for project in projects where expanded.contains(project.key) {
                 keys += visibleSessions(in: project).map { RowKey.project($0.id) }
@@ -1066,6 +1109,16 @@ final class Library: ObservableObject {
     }
 
     // MARK: - Calendar
+
+    /// Today is open unless it was closed by hand; the other days of the week are closed
+    /// unless opened.
+    func isDayExpanded(_ day: String) -> Bool {
+        dayFold[day] ?? (day == today)
+    }
+
+    func toggleDay(_ day: String) {
+        dayFold[day] = !isDayExpanded(day)
+    }
 
     static let calendar: Calendar = {
         var calendar = Calendar(identifier: .gregorian)

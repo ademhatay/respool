@@ -120,6 +120,24 @@ struct PinnedSession: Identifiable, Hashable {
     var openCount: Int { tasks.filter { !$0.done }.count }
 }
 
+/// A session that was used on one day, and how many prompts were typed in it there.
+struct DayWork: Identifiable, Hashable {
+    var session: SessionRecord
+    var prompts: Int
+
+    var id: String { session.id }
+}
+
+/// What a day's work touched: its sessions, the most used first.
+struct DaySummary: Identifiable, Hashable {
+    /// The day, as a day key.
+    let day: String
+    var work: [DayWork]
+
+    var id: String { day }
+    var prompts: Int { work.reduce(0) { $0 + $1.prompts } }
+}
+
 struct ProjectGroup: Identifiable, Hashable {
     let key: String
     var name: String
@@ -232,6 +250,7 @@ enum PanelSection {
     static let todos = "todos"
     static let pinned = "pinned"
     static let recent = "recent"
+    static let week = "week"
     static let projects = "projects"
 }
 
@@ -318,6 +337,13 @@ enum Format {
         dayKeyFormatter.string(from: date)
     }
 
+    /// The same, read off the calendar instead of a formatter, which is not safe off the main
+    /// thread. The calendar must be the one the panel's weeks are cut by.
+    static func dayKey(_ date: Date, in calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
     static func date(fromDayKey key: String) -> Date? {
         dayKeyFormatter.date(from: key)
     }
@@ -393,11 +419,14 @@ enum RowKey {
     static func pin(_ id: String) -> String { "pin:" + id }
     static func recent(_ id: String) -> String { "recent:" + id }
     static func project(_ id: String) -> String { "project:" + id }
+    static func day(_ day: String, _ id: String) -> String { "day:" + day + ":" + id }
     static func hit(_ id: String) -> String { "hit:" + id }
     static func tagged(_ id: String) -> String { "tagged:" + id }
 
     static func sessionID(_ key: String) -> String {
-        key.split(separator: ":", maxSplits: 1).last.map(String.init) ?? key
+        // A day's rows name the day as well: day:<day>:<session id>.
+        let parts = key.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        return String(parts.last ?? Substring(key))
     }
 }
 
