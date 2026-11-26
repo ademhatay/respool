@@ -449,7 +449,7 @@ struct SessionRow: View {
     var inset: CGFloat = 0
     var onAddTask: (() -> Void)?
 
-    @State private var hovering = false
+    @State private var hovering = Snapshot.showsHover
 
     var body: some View {
         let style = RowStyle(selected: library.selection == rowKey)
@@ -933,7 +933,7 @@ struct TaskRow: View {
     /// The tasks shown together with this one, in order. Among them, open tasks can be dragged.
     var list: [TaskItem] = []
 
-    @State private var hovering = false
+    @State private var hovering = Snapshot.showsHover
 
     private var isOverdue: Bool {
         !task.done && task.due.map { $0 < library.today } == true
@@ -1889,7 +1889,7 @@ struct ProjectSection: View {
     let project: ProjectGroup
     var focus: FocusState<PanelField?>.Binding
 
-    @State private var hovering = false
+    @State private var hovering = Snapshot.showsHover
     @State private var draft = ""
 
     var body: some View {
@@ -1963,6 +1963,11 @@ struct ProjectSection: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 4)
+            if hovering {
+                IconButton(symbol: "terminal", help: "Bu projede yeni sohbet başlat", style: RowStyle(selected: false)) {
+                    library.startSession(in: project)
+                }
+            }
             Text(RelativeTime.short(project.lastActivity))
                 .font(.system(size: 11))
                 .monospacedDigit()
@@ -1983,6 +1988,7 @@ struct ProjectSection: View {
     }
 
     @ViewBuilder private var menu: some View {
+        Button("Yeni sohbet başlat") { library.startSession(in: project) }
         Button("Görev ekle") { library.beginTask(linkedTo: .project(key: project.key, name: project.name)) }
         Button("Yeniden adlandır") { library.renamingProject = project.key }
         Menu("Şununla birleştir") {

@@ -3,6 +3,8 @@ import SwiftUI
 
 /// Developer tool: renders the panel to a PNG without showing a window, for checking the design.
 enum Snapshot {
+    /// Set by `--hover`, so that a drawing shows what only appears while the pointer is over a row.
+    static var showsHover = false
     static func render(library: Library, to path: String, dark: Bool, height: CGFloat) -> Bool {
         let size = NSSize(width: Metrics.panelWidth, height: height)
         let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)

@@ -40,7 +40,8 @@ Respool is an independent project and is not affiliated with Anthropic.
 - **Details on hover.** Rest the pointer on a session or project for a card with a context
   gauge, token usage, an activity chart, transcript size, model, branch and folder.
 - **Opening.** A session opens where it lives: in the Claude desktop app, by bringing its
-  terminal forward, or by resuming it in a new terminal.
+  terminal forward, or by resuming it in a new terminal. The button on a project's row starts
+  a new session in its folder.
 - **Accounts.** Optional. If you use several Claude organizations, a switcher narrows the list
   to one of them.
 

@@ -1043,13 +1043,26 @@ final class Library: ObservableObject {
             show(notice: "Görev panoya kopyalandı")
             open(session)
         } else if let key = task.projectKey, let project = allProjects.first(where: { $0.key == key }) {
-            let folder = project.folders.first { FileManager.default.fileExists(atPath: $0) }
-            guard let folder else {
+            guard let folder = existingFolder(of: project) else {
                 show(notice: "Proje klasörü bulunamadı")
                 return
             }
             onStartSession?(folder, task.text)
         }
+    }
+
+    /// Starts a new session in a project's folder, with nothing typed yet.
+    func startSession(in project: ProjectGroup) {
+        guard let folder = existingFolder(of: project) else {
+            show(notice: "Proje klasörü bulunamadı")
+            return
+        }
+        onStartSession?(folder, "")
+    }
+
+    /// A folder of the project that is still on this Mac.
+    private func existingFolder(of project: ProjectGroup) -> String? {
+        project.folders.first { FileManager.default.fileExists(atPath: $0) }
     }
 
     // MARK: - Calendar

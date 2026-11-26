@@ -156,6 +156,7 @@ if let output = value(after: "--snapshot") {
             library.searchSync()
             if arguments.contains("--select") { library.selection = library.results?.first.map { RowKey.hit($0.id) } }
         }
+        Snapshot.showsHover = arguments.contains("--hover")
         let height = value(after: "--height").flatMap(Double.init).map { CGFloat($0) } ?? 860
         let ok = Snapshot.render(library: library, to: output, dark: arguments.contains("--dark"), height: height)
         print(ok ? "wrote \(output)" : "snapshot failed")
@@ -336,6 +337,10 @@ if arguments.contains("--selftest") {
         let hasFolder = target.folders.contains { FileManager.default.fileExists(atPath: $0) }
         check("run starts a session for a project's task",
               started?.prompt == projectTask.text || (!hasFolder && library.notice == "Proje klasörü bulunamadı"))
+        library.startSession(in: target)
+        check("a new session starts in a project's folder with nothing typed",
+              started.map { $0.prompt == "" && FileManager.default.fileExists(atPath: $0.folder) } == true
+              || (!hasFolder && library.notice == "Proje klasörü bulunamadı"))
         library.onStartSession = nil
 
         // Sorting and hiding only change the list; every project stays known.
