@@ -73,6 +73,7 @@ if let output = value(after: "--snapshot") {
         if arguments.contains("--detail-project"), let project = library.projects.max(by: { $0.sessions.count < $1.sessions.count }) {
             library.hover = HoverTarget(subject: .project(project), rowMidY: 200)
         }
+        library.loadActivitySync()
         if arguments.contains("--preview-pins") { library.applyPreviewPins() }
         if let expand = value(after: "--expand") {
             library.expanded = Set(library.projects.filter { $0.name == expand }.map(\.key))

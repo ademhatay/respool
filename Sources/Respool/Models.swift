@@ -119,6 +119,23 @@ enum HoverSubject: Hashable {
     case project(ProjectGroup)
 }
 
+extension HoverSubject {
+    var key: String {
+        switch self {
+        case .session(let session): return "session:" + session.id
+        case .project(let project): return "project:" + project.key
+        }
+    }
+}
+
+/// How busy a session or project was over time, as counts per equal slice of the period.
+struct ActivitySeries: Hashable {
+    var key: String
+    var buckets: [Int]
+    var startLabel: String
+    var endLabel: String
+}
+
 struct HoverTarget: Hashable {
     var subject: HoverSubject
     /// Vertical center of the row, measured down from the top of the panel.
@@ -133,18 +150,30 @@ enum Format {
         return formatter
     }()
 
+    /// A token count in the largest unit that keeps it short: 512K, 39,2M, 1,5 Mr.
     static func tokens(_ count: Int) -> String {
-        if count >= 1_000_000_000 {
-            return String(format: "%.1f Mr", Double(count) / 1_000_000_000).replacingOccurrences(of: ".", with: ",")
+        func scaled(_ divisor: Double, _ suffix: String) -> String {
+            let value = (Double(count) / divisor * 10).rounded() / 10
+            let text = value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+            return text.replacingOccurrences(of: ".", with: ",") + suffix
         }
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000).replacingOccurrences(of: ".", with: ",")
-        }
+        if count >= 1_000_000_000 { return scaled(1_000_000_000, " Mr") }
+        if count >= 1_000_000 { return scaled(1_000_000, "M") }
         if count >= 10_000 { return "\(Int((Double(count) / 1000).rounded()))K" }
-        if count >= 1000 {
-            return String(format: "%.1fK", Double(count) / 1000).replacingOccurrences(of: ".", with: ",")
-        }
+        if count >= 1000 { return scaled(1000, "K") }
         return "\(count)"
+    }
+
+    private static let grouped: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
+
+    /// A plain count with thousands separators, such as 1.280.
+    static func count(_ value: Int) -> String {
+        grouped.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 
     static func bytes(_ count: Int) -> String {
@@ -153,6 +182,30 @@ enum Format {
 
     static func date(_ date: Date?) -> String {
         date.map(dateTime.string(from:)) ?? "—"
+    }
+
+    private static let shortDateTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.dateFormat = "d MMM HH:mm"
+        return formatter
+    }()
+
+    static func shortDate(_ date: Date) -> String {
+        shortDateTime.string(from: date)
+    }
+
+    /// A length of time in its two largest units, such as "6 sa 40 dk" or "3 gün 2 sa".
+    static func duration(_ seconds: TimeInterval) -> String {
+        let minutes = Int(seconds / 60)
+        if minutes < 1 { return "1 dk'dan az" }
+        if minutes < 60 { return "\(minutes) dk" }
+        let hours = minutes / 60
+        if hours < 24 {
+            return minutes % 60 == 0 ? "\(hours) sa" : "\(hours) sa \(minutes % 60) dk"
+        }
+        let days = hours / 24
+        return hours % 24 == 0 ? "\(days) gün" : "\(days) gün \(hours % 24) sa"
     }
 
     static func path(_ path: String) -> String {

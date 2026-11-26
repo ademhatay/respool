@@ -20,8 +20,8 @@ Respool is an independent project and is not affiliated with Anthropic.
 - **Tags.** Give sessions colored tags and filter the list by tag.
 - **Live status.** Shows which sessions are running, and whether Claude is working or waiting
   for you.
-- **Details on hover.** Rest the pointer on a session or project to see token usage, context
-  size, transcript size, model, branch and folder.
+- **Details on hover.** Rest the pointer on a session or project for a card with a context
+  gauge, token usage, an activity chart, transcript size, model, branch and folder.
 - **Opening.** A session opens where it lives: in the Claude desktop app, by bringing its
   terminal forward, or by resuming it in a new terminal.
 - **Accounts.** Optional. If you use several Claude organizations, a switcher narrows the list

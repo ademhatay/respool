@@ -791,120 +791,271 @@ struct HoverDetail: ViewModifier {
 
 /// The facts about one session or project, shown beside the panel.
 struct DetailCard: View {
-    static let width: CGFloat = 300
+    static let width: CGFloat = 320
 
     @ObservedObject var library: Library
     let subject: HoverSubject
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             switch subject {
             case .session(let session): sessionBody(session)
             case .project(let project): projectBody(project)
             }
         }
-        .padding(14)
+        .padding(16)
         .frame(width: Self.width, alignment: .leading)
     }
 
+    // MARK: Session
+
     @ViewBuilder private func sessionBody(_ session: SessionRecord) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(session.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(session.placeLabel)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-        }
-        if let live = library.live[session.id] {
             HStack(spacing: 6) {
-                LiveIndicator(live: live, selected: false)
-                Text(live.label + (live.isInTerminal ? ", terminalde" : ", Claude uygulamasında"))
-                    .font(.system(size: 11))
-            }
-        }
-        let tags = library.tags(for: session)
-        if !tags.isEmpty {
-            HStack(spacing: 8) {
-                ForEach(tags) { tag in
-                    HStack(spacing: 4) {
-                        TagMark(color: TagPalette.color(tag.color))
-                        Text(tag.name).font(.system(size: 11))
-                    }
+                Text(session.placeLabel)
+                    .foregroundStyle(.secondary)
+                if let live = library.live[session.id] {
+                    Text("·").foregroundStyle(.tertiary)
+                    LiveIndicator(live: live, selected: false)
+                    Text(live.label + (live.isInTerminal ? ", terminalde" : ", Claude'da"))
                 }
             }
-        }
-        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 5) {
-            line("Son etkinlik", Format.date(session.lastActivity))
-            line("Başlangıç", Format.date(session.firstActivity))
-            line("İstem", "\(session.messageCount)")
-            if let context = session.contextTokens {
-                line("Bağlam", Format.tokens(context) + " token")
+            .font(.system(size: 11))
+            let tags = library.tags(for: session)
+            if !tags.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(tags) { tag in
+                        HStack(spacing: 4) {
+                            TagMark(color: TagPalette.color(tag.color))
+                            Text(tag.name).font(.system(size: 11))
+                        }
+                    }
+                }
+                .padding(.top, 1)
             }
-            line("Girdi", Format.tokens(session.inputTokens) + " token")
-            line("Önbellekten", Format.tokens(session.cachedTokens) + " token")
-            line("Çıktı", Format.tokens(session.outputTokens) + " token")
-            line("Boyut", Format.bytes(session.fileSize))
-            if let model = session.model { line("Model", model) }
-            if let branch = session.branch { line("Dal", branch) }
-            if let number = session.prNumber { line("PR", "#\(number)") }
-            line("Klasör", Format.path(session.cwd))
         }
+
+        if let context = session.contextTokens {
+            ContextGauge(tokens: context)
+        }
+
+        HStack(spacing: 6) {
+            StatTile(value: Format.count(session.messageCount), label: "İstem")
+            StatTile(value: duration(of: session), label: "Süre")
+            StatTile(value: Format.bytes(session.fileSize), label: "Boyut")
+        }
+
+        section("Token") {
+            HStack(spacing: 6) {
+                StatTile(value: Format.tokens(session.inputTokens), label: "Girdi")
+                StatTile(value: Format.tokens(session.cachedTokens), label: "Önbellek")
+                StatTile(value: Format.tokens(session.outputTokens), label: "Çıktı")
+            }
+        }
+
+        section("Etkinlik") { activityChart }
+
+        VStack(alignment: .leading, spacing: 5) {
+            if let model = session.model { fact("cpu", model) }
+            if let branch = session.branch, branch != "HEAD" { fact("arrow.triangle.branch", branch) }
+            if let number = session.prNumber { fact("arrow.triangle.pull", "Pull request #\(number)") }
+            fact("folder", Format.path(session.cwd))
+        }
+
         if let prompt = session.lastPrompt, !prompt.isEmpty {
-            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
             Text(prompt)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 9)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1).fill(Color.primary.opacity(0.18)).frame(width: 2)
+                }
         }
     }
 
+    private func duration(of session: SessionRecord) -> String {
+        guard let first = session.firstActivity, let last = session.lastActivity else { return "—" }
+        return Format.duration(last.timeIntervalSince(first))
+    }
+
+    // MARK: Project
+
     @ViewBuilder private func projectBody(_ project: ProjectGroup) -> some View {
         let sessions = project.sessions
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(project.name)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .lineLimit(2)
-            Text("\(sessions.count) sohbet")
+            Text("Son etkinlik " + Format.date(project.lastActivity))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
-        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 5) {
-            line("Son etkinlik", Format.date(project.lastActivity))
-            line("İlk sohbet", Format.date(sessions.compactMap(\.firstActivity).min()))
-            line("İstem", "\(sessions.reduce(0) { $0 + $1.messageCount })")
-            line("Girdi", Format.tokens(sessions.reduce(0) { $0 + $1.inputTokens }) + " token")
-            line("Önbellekten", Format.tokens(sessions.reduce(0) { $0 + $1.cachedTokens }) + " token")
-            line("Çıktı", Format.tokens(sessions.reduce(0) { $0 + $1.outputTokens }) + " token")
-            line("Boyut", Format.bytes(sessions.reduce(0) { $0 + $1.fileSize }))
+
+        HStack(spacing: 6) {
+            StatTile(value: Format.count(sessions.count), label: "Sohbet")
+            StatTile(value: Format.count(sessions.reduce(0) { $0 + $1.messageCount }), label: "İstem")
+            StatTile(value: Format.bytes(sessions.reduce(0) { $0 + $1.fileSize }), label: "Boyut")
         }
+
+        section("Token") {
+            HStack(spacing: 6) {
+                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.inputTokens }), label: "Girdi")
+                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.cachedTokens }), label: "Önbellek")
+                StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.outputTokens }), label: "Çıktı")
+            }
+        }
+
+        section("Son 30 gün") { activityChart }
+
         if !project.folders.isEmpty {
-            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(project.folders.prefix(6), id: \.self) { folder in
-                    Text(Format.path(folder))
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(project.folders.prefix(5), id: \.self) { folder in
+                    fact("folder", Format.path(folder))
+                }
+                if project.folders.count > 5 {
+                    Text("ve \(project.folders.count - 5) klasör daha")
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 20)
                 }
             }
         }
     }
 
-    private func line(_ label: String, _ value: String) -> some View {
-        GridRow {
-            Text(label)
-                .font(.system(size: 11))
+    // MARK: Pieces
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
-            Text(value)
+            content()
+        }
+    }
+
+    private var activityChart: some View {
+        let series = library.hoverActivity?.key == subject.key ? library.hoverActivity : nil
+        return VStack(spacing: 4) {
+            ActivityChart(buckets: series?.buckets ?? Array(repeating: 0, count: Library.activityBuckets))
+            HStack {
+                Text(series?.startLabel ?? " ")
+                Spacer()
+                Text(series?.endLabel ?? " ")
+            }
+            .font(.system(size: 10))
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func fact(_ symbol: String, _ text: String) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 13)
+            Text(text)
                 .font(.system(size: 11))
-                .monospacedDigit()
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+    }
+}
+
+/// One figure with its label, sized so three sit side by side.
+struct StatTile: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.system(size: 14, weight: .semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
+    }
+}
+
+/// How full the context was on the session's latest turn, on a fixed scale up to one million
+/// tokens with a mark at 200K, the two context sizes Claude Code runs with.
+struct ContextGauge: View {
+    let tokens: Int
+
+    private static let scale = 1_000_000.0
+    private static let mark = 200_000.0
+
+    var body: some View {
+        let fraction = min(Double(tokens) / Self.scale, 1)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Bağlam")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(Format.tokens(tokens) + " token")
+                    .font(.system(size: 12, weight: .semibold))
+                    .monospacedDigit()
+            }
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.10))
+                    Capsule()
+                        .fill(fraction > 0.8 ? Color.orange : Color.accentColor)
+                        .frame(width: max(proxy.size.width * fraction, 6))
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.45))
+                        .frame(width: 1.5, height: 10)
+                        .offset(x: proxy.size.width * Self.mark / Self.scale)
+                }
+            }
+            .frame(height: 6)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Text("200K").offset(x: proxy.size.width * Self.mark / Self.scale - 11)
+                    Text("1M").frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            .frame(height: 11)
+            .font(.system(size: 9))
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// A row of bars, one per slice of time, scaled to the busiest slice.
+struct ActivityChart: View {
+    let buckets: [Int]
+
+    private static let height: CGFloat = 34
+
+    var body: some View {
+        let peak = max(buckets.max() ?? 0, 1)
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(buckets.indices, id: \.self) { index in
+                let count = buckets[index]
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(count == 0 ? Color.primary.opacity(0.10) : Color.accentColor)
+                    .frame(height: count == 0 ? 2 : max(4, Self.height * CGFloat(count) / CGFloat(peak)))
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: Self.height, alignment: .bottom)
     }
 }
 

@@ -43,7 +43,11 @@ final class Library: ObservableObject {
     }
     @Published var tagEditor: TagEditor?
     /// The row the pointer has rested on long enough to show its details.
-    @Published var hover: HoverTarget?
+    @Published var hover: HoverTarget? {
+        didSet { if hover?.subject.key != oldValue?.subject.key { loadActivity() } }
+    }
+    /// Activity over time for the hovered row; arrives a moment after `hover` is set.
+    @Published private(set) var hoverActivity: ActivitySeries?
     @Published var showingSettings = false
     @Published private(set) var recordingShortcut = false
     /// Off by default: most people have one organization and do not need the switcher.
@@ -614,6 +618,65 @@ final class Library: ObservableObject {
 
     func delete(_ task: TaskItem) {
         write { db in try db.run("DELETE FROM tasks WHERE id = ?", [task.id]) }
+    }
+
+    // MARK: - Activity
+
+    static let activityBuckets = 30
+
+    private func loadActivity() {
+        guard let subject = hover?.subject else {
+            hoverActivity = nil
+            return
+        }
+        if hoverActivity?.key != subject.key { hoverActivity = nil }
+        readQueue.async { [weak self] in
+            guard let self else { return }
+            let series = self.activity(for: subject)
+            DispatchQueue.main.async {
+                guard self.hover?.subject.key == subject.key else { return }
+                self.hoverActivity = series
+            }
+        }
+    }
+
+    func loadActivitySync() {
+        hoverActivity = hover.map { activity(for: $0.subject) }
+    }
+
+    /// A session is charted across its own lifetime; a project across the last thirty days.
+    private func activity(for subject: HoverSubject) -> ActivitySeries {
+        let count = Self.activityBuckets
+        var buckets = [Int](repeating: 0, count: count)
+        switch subject {
+        case .session(let session):
+            var stamps: [Double] = []
+            try? readDB.query("SELECT ts FROM messages WHERE session_id = ?", [session.id]) { row in
+                if let stamp = row.double(0), stamp > 0 { stamps.append(stamp) }
+            }
+            guard let first = stamps.min(), let last = stamps.max() else {
+                return ActivitySeries(key: subject.key, buckets: buckets, startLabel: "", endLabel: "")
+            }
+            let span = max(last - first, 1)
+            for stamp in stamps {
+                buckets[min(Int((stamp - first) / span * Double(count)), count - 1)] += 1
+            }
+            return ActivitySeries(
+                key: subject.key, buckets: buckets,
+                startLabel: Format.shortDate(Date(timeIntervalSince1970: first)),
+                endLabel: Format.shortDate(Date(timeIntervalSince1970: last))
+            )
+        case .project(let project):
+            let ids = Set(project.sessions.map(\.id))
+            let day = 86_400.0
+            let end = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 + day
+            let start = end - Double(count) * day
+            try? readDB.query("SELECT session_id, ts FROM messages WHERE role = 'u'") { row in
+                guard let id = row.text(0), ids.contains(id), let stamp = row.double(1), stamp >= start, stamp < end else { return }
+                buckets[min(Int((stamp - start) / day), count - 1)] += 1
+            }
+            return ActivitySeries(key: subject.key, buckets: buckets, startLabel: "\(count) gün önce", endLabel: "bugün")
+        }
     }
 
     // MARK: - Shortcut
