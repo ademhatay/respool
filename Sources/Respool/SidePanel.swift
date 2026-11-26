@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 enum Metrics {
@@ -20,6 +21,9 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var keyMonitor: Any?
     private var lastHidden = Date.distantPast
     private var liveTimer: Timer?
+    private let detailPanel: NSPanel
+    private let detailBackdrop = NSVisualEffectView()
+    private var hoverObserver: AnyCancellable?
     private(set) var isShown = false
 
     init(library: Library) {
@@ -30,7 +34,28 @@ final class PanelController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: true
         )
+        detailPanel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: DetailCard.width, height: 200),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
         super.init()
+
+        detailPanel.level = .floating
+        detailPanel.isOpaque = false
+        detailPanel.backgroundColor = .clear
+        detailPanel.hasShadow = true
+        detailPanel.ignoresMouseEvents = true
+        detailPanel.animationBehavior = .none
+        detailBackdrop.material = .popover
+        detailBackdrop.blendingMode = .behindWindow
+        detailBackdrop.state = .active
+        detailBackdrop.maskImage = Self.roundedMask(radius: 14)
+        detailPanel.contentView = detailBackdrop
+        hoverObserver = library.$hover.removeDuplicates().sink { [weak self] target in
+            self?.showDetail(target)
+        }
 
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
@@ -110,6 +135,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         lastHidden = Date()
         liveTimer?.invalidate()
         liveTimer = nil
+        library.hover = nil
         let frame = panel.frame.offsetBy(dx: 24, dy: 0)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.14
@@ -120,6 +146,38 @@ final class PanelController: NSObject, NSWindowDelegate {
             guard let self, !self.isShown else { return }
             self.panel.orderOut(nil)
         }
+    }
+
+    /// Shows the detail card to the left of the panel, level with the row it describes.
+    private func showDetail(_ target: HoverTarget?) {
+        guard isShown, let target, let screen = panel.screen else {
+            if detailPanel.parent != nil { panel.removeChildWindow(detailPanel) }
+            detailPanel.orderOut(nil)
+            return
+        }
+        let hosting = NSHostingView(rootView: DetailCard(library: library, subject: target.subject))
+        let size = hosting.fittingSize
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.autoresizingMask = [.width, .height]
+        detailBackdrop.subviews.forEach { $0.removeFromSuperview() }
+        detailBackdrop.addSubview(hosting)
+
+        let visible = screen.visibleFrame
+        let rowY = panel.frame.maxY - target.rowMidY
+        let y = min(max(rowY - size.height / 2, visible.minY + Metrics.screenInset),
+                    visible.maxY - size.height - Metrics.screenInset)
+        let frame = NSRect(x: panel.frame.minX - size.width - 8, y: y, width: size.width, height: size.height)
+        let wasVisible = detailPanel.isVisible
+        detailPanel.setFrame(frame, display: true)
+        if !wasVisible {
+            detailPanel.alphaValue = 0
+            panel.addChildWindow(detailPanel, ordered: .above)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                detailPanel.animator().alphaValue = 1
+            }
+        }
+        detailPanel.invalidateShadow()
     }
 
     func windowDidResignKey(_ notification: Notification) {

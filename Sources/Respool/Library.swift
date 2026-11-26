@@ -42,6 +42,8 @@ final class Library: ObservableObject {
         didSet { if tagFilter != oldValue { reload() } }
     }
     @Published var tagEditor: TagEditor?
+    /// The row the pointer has rested on long enough to show its details.
+    @Published var hover: HoverTarget?
     @Published var showingSettings = false
     @Published private(set) var recordingShortcut = false
     /// Off by default: most people have one organization and do not need the switcher.
@@ -87,6 +89,7 @@ final class Library: ObservableObject {
     init() throws {
         indexDB = try Database(path: Paths.database)
         try indexDB.exec(Schema.sql)
+        try Schema.migrate(indexDB)
         readDB = try Database(path: Paths.database)
         userDB = try Database(path: Paths.database)
         expanded = Set(UserDefaults.standard.stringArray(forKey: "expandedProjects") ?? [])
@@ -191,7 +194,8 @@ final class Library: ObservableObject {
         var ordered: [SessionRecord] = []
         try? readDB.query(
             """
-            SELECT id, path, cwd, custom_title, ai_title, first_prompt, last_prompt, last_ts, pr_number, pr_url, msg_count
+            SELECT id, path, cwd, custom_title, ai_title, first_prompt, last_prompt, last_ts, pr_number, pr_url, msg_count,
+                   first_ts, branch, file_size, tok_input, tok_cached, tok_output, context_tokens, model
             FROM sessions
             WHERE msg_count > 0 OR (custom_title IS NOT NULL AND custom_title != '')
             ORDER BY last_ts DESC
@@ -207,6 +211,14 @@ final class Library: ObservableObject {
                 prNumber: row.optionalInt(8), prURL: row.text(9),
                 messageCount: row.int(10)
             )
+            record.firstActivity = row.date(11).flatMap { $0.timeIntervalSince1970 > 0 ? $0 : nil }
+            record.branch = row.text(12)
+            record.fileSize = row.int(13)
+            record.inputTokens = row.int(14)
+            record.cachedTokens = row.int(15)
+            record.outputTokens = row.int(16)
+            record.contextTokens = row.optionalInt(17)
+            record.model = row.text(18)
             let identity = identities[cwd] ?? {
                 let fallback = ProjectResolver.fallback(cwd.isEmpty ? "Diğer" : cwd, durable: false)
                 return (fallback.key, fallback.name)
@@ -472,6 +484,7 @@ final class Library: ObservableObject {
     }
 
     func open(_ session: SessionRecord) {
+        hover = nil
         onOpen?(session)
     }
 
@@ -534,6 +547,7 @@ final class Library: ObservableObject {
 
     func panelDidOpen() {
         selection = nil
+        hover = nil
         addingTaskFor = nil
         renamingProject = nil
         tagEditor = nil

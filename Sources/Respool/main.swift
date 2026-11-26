@@ -10,6 +10,8 @@ if arguments.contains("--index") {
         let stats = library.runIndex()
         library.reloadSync()
         let seconds = String(format: "%.1f", Date().timeIntervalSince(started))
+        let totals = library.projects.flatMap(\.sessions)
+        print("tokens in \(Format.tokens(totals.reduce(0) { $0 + $1.inputTokens }))  cached \(Format.tokens(totals.reduce(0) { $0 + $1.cachedTokens }))  out \(Format.tokens(totals.reduce(0) { $0 + $1.outputTokens }))")
         print("files \(stats.total)  updated \(stats.updated)  removed \(stats.removed)  messages \(stats.messages)  \(seconds)s")
         print("sessions \(library.sessionCount)  projects \(library.projects.count)")
         for project in library.projects {
@@ -64,6 +66,12 @@ if let output = value(after: "--snapshot") {
             library.showsOrganizations = arguments.contains("--accounts")
             library.reloadSync()
             library.showingSettings = true
+        }
+        if arguments.contains("--detail"), let session = library.recent.dropFirst().first {
+            library.hover = HoverTarget(subject: .session(session), rowMidY: 200)
+        }
+        if arguments.contains("--detail-project"), let project = library.projects.max(by: { $0.sessions.count < $1.sessions.count }) {
+            library.hover = HoverTarget(subject: .project(project), rowMidY: 200)
         }
         if arguments.contains("--preview-pins") { library.applyPreviewPins() }
         if let expand = value(after: "--expand") {

@@ -160,9 +160,7 @@ struct PanelView: View {
     }
 
     @ViewBuilder private var browseRows: some View {
-        if library.pinned.isEmpty {
-            pinHint
-        } else {
+        if !library.pinned.isEmpty {
             SectionHeader(title: "Sabitlenenler")
             ForEach(library.pinned) { item in
                 PinnedCard(library: library, item: item, focus: $focus)
@@ -234,20 +232,6 @@ struct PanelView: View {
                 )
             }
         }
-    }
-
-    private var pinHint: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "pin")
-                .font(.system(size: 11, weight: .medium))
-            Text("Sık döndüğünüz sohbetleri sabitleyin. Sabitlediğiniz her sohbete görev ekleyebilirsiniz.")
-                .font(.system(size: 12))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 8)
-        .padding(.top, 12)
-        .padding(.bottom, 2)
     }
 
     private var emptyLibrary: some View {
@@ -436,7 +420,7 @@ struct SessionRow: View {
         .onHover { hovering = $0 }
         .onTapGesture { library.open(session) }
         .contextMenu { menu(pinned: pinned, live: live) }
-        .help(helpText(live: live))
+        .modifier(HoverDetail(library: library, subject: .session(session)))
         .id(rowKey)
     }
 
@@ -461,18 +445,6 @@ struct SessionRow: View {
         Divider()
         Button("Klasörü Finder'da göster") { Opener.revealFolder(session.cwd) }
         Button("Oturum kimliğini kopyala") { Opener.copy(session.id) }
-    }
-
-    private func helpText(live: LiveSession?) -> String {
-        var lines: [String] = []
-        if let live {
-            let place = live.isInTerminal ? "terminalde" : "Claude uygulamasında"
-            let reason = live.waitingFor.map { " (\($0))" } ?? ""
-            lines.append("\(live.label), \(place)\(reason)")
-        }
-        if let prompt = session.lastPrompt, !prompt.isEmpty { lines.append(prompt) }
-        lines.append(session.cwd)
-        return lines.joined(separator: "\n")
     }
 
     private func highlighted(_ snippet: Snippet, style: RowStyle) -> AttributedString {
@@ -782,6 +754,160 @@ struct OrganizationEditor: View {
     }
 }
 
+// MARK: - Detail card
+
+private struct RowFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+/// Reports the row to the library once the pointer has rested on it, so its details can be shown.
+struct HoverDetail: ViewModifier {
+    let library: Library
+    let subject: HoverSubject
+
+    @State private var frame: CGRect = .zero
+    @State private var pending: DispatchWorkItem?
+
+    func body(content: Content) -> some View {
+        content
+            .background(GeometryReader { proxy in
+                Color.clear.preference(key: RowFrameKey.self, value: proxy.frame(in: .global))
+            })
+            .onPreferenceChange(RowFrameKey.self) { frame = $0 }
+            .onHover { inside in
+                pending?.cancel()
+                pending = nil
+                if inside {
+                    let work = DispatchWorkItem { library.hover = HoverTarget(subject: subject, rowMidY: frame.midY) }
+                    pending = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+                } else if library.hover?.subject == subject {
+                    library.hover = nil
+                }
+            }
+    }
+}
+
+/// The facts about one session or project, shown beside the panel.
+struct DetailCard: View {
+    static let width: CGFloat = 300
+
+    @ObservedObject var library: Library
+    let subject: HoverSubject
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch subject {
+            case .session(let session): sessionBody(session)
+            case .project(let project): projectBody(project)
+            }
+        }
+        .padding(14)
+        .frame(width: Self.width, alignment: .leading)
+    }
+
+    @ViewBuilder private func sessionBody(_ session: SessionRecord) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(session.title)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(session.placeLabel)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        if let live = library.live[session.id] {
+            HStack(spacing: 6) {
+                LiveIndicator(live: live, selected: false)
+                Text(live.label + (live.isInTerminal ? ", terminalde" : ", Claude uygulamasında"))
+                    .font(.system(size: 11))
+            }
+        }
+        let tags = library.tags(for: session)
+        if !tags.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(tags) { tag in
+                    HStack(spacing: 4) {
+                        TagMark(color: TagPalette.color(tag.color))
+                        Text(tag.name).font(.system(size: 11))
+                    }
+                }
+            }
+        }
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 5) {
+            line("Son etkinlik", Format.date(session.lastActivity))
+            line("Başlangıç", Format.date(session.firstActivity))
+            line("İstem", "\(session.messageCount)")
+            if let context = session.contextTokens {
+                line("Bağlam", Format.tokens(context) + " token")
+            }
+            line("Girdi", Format.tokens(session.inputTokens) + " token")
+            line("Önbellekten", Format.tokens(session.cachedTokens) + " token")
+            line("Çıktı", Format.tokens(session.outputTokens) + " token")
+            line("Boyut", Format.bytes(session.fileSize))
+            if let model = session.model { line("Model", model) }
+            if let branch = session.branch { line("Dal", branch) }
+            if let number = session.prNumber { line("PR", "#\(number)") }
+            line("Klasör", Format.path(session.cwd))
+        }
+        if let prompt = session.lastPrompt, !prompt.isEmpty {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+            Text(prompt)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private func projectBody(_ project: ProjectGroup) -> some View {
+        let sessions = project.sessions
+        VStack(alignment: .leading, spacing: 3) {
+            Text(project.name)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(2)
+            Text("\(sessions.count) sohbet")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 5) {
+            line("Son etkinlik", Format.date(project.lastActivity))
+            line("İlk sohbet", Format.date(sessions.compactMap(\.firstActivity).min()))
+            line("İstem", "\(sessions.reduce(0) { $0 + $1.messageCount })")
+            line("Girdi", Format.tokens(sessions.reduce(0) { $0 + $1.inputTokens }) + " token")
+            line("Önbellekten", Format.tokens(sessions.reduce(0) { $0 + $1.cachedTokens }) + " token")
+            line("Çıktı", Format.tokens(sessions.reduce(0) { $0 + $1.outputTokens }) + " token")
+            line("Boyut", Format.bytes(sessions.reduce(0) { $0 + $1.fileSize }))
+        }
+        if !project.folders.isEmpty {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(project.folders.prefix(6), id: \.self) { folder in
+                    Text(Format.path(folder))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+    }
+
+    private func line(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+}
+
 // MARK: - Settings
 
 struct SettingsView: View {
@@ -814,11 +940,11 @@ struct SettingsView: View {
             .padding(.bottom, 8)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    SettingsGroup(note: "Paneli her yerden açıp kapatır. Değiştirmek için tıklayın, sonra yeni tuşlara basın.") {
+                VStack(alignment: .leading, spacing: 10) {
+                    SettingsGroup {
                         SettingsRow(title: "Kısayol") { shortcutButton }
                     }
-                    SettingsGroup(note: nil) {
+                    SettingsGroup {
                         SettingsRow(title: "Girişte başlat") {
                             Toggle("", isOn: Binding(
                                 get: { library.launchesAtLogin },
@@ -829,7 +955,7 @@ struct SettingsView: View {
                             .controlSize(.small)
                         }
                     }
-                    SettingsGroup(note: "Birden fazla Claude organizasyonu kullanıyorsanız, listeyi birine daraltan bir seçici gösterir.") {
+                    SettingsGroup {
                         SettingsRow(title: "Hesapları göster") {
                             Toggle("", isOn: $library.showsOrganizations)
                                 .labelsHidden()
@@ -895,23 +1021,13 @@ struct SettingsView: View {
     }
 }
 
-/// One rounded block of settings rows with an optional explanation underneath.
+/// One rounded block of settings rows.
 struct SettingsGroup<Content: View>: View {
-    let note: String?
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            content
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
-            if let note {
-                Text(note)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-            }
-        }
+        content
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
     }
 }
 
@@ -1028,7 +1144,7 @@ struct ProjectSection: View {
             withAnimation(.easeOut(duration: 0.15)) { library.toggleExpanded(project.key) }
         }
         .contextMenu { menu }
-        .help(project.folders.joined(separator: "\n"))
+        .modifier(HoverDetail(library: library, subject: .project(project)))
     }
 
     @ViewBuilder private var menu: some View {

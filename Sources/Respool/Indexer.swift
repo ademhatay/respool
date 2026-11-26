@@ -46,6 +46,13 @@ final class Indexer {
         var prURL: String?
         var prNumber: Int?
         var promptCount = 0
+        var inputTokens = 0
+        var cachedTokens = 0
+        var outputTokens = 0
+        /// Tokens the model read on its latest turn, which is how full the context is.
+        var contextTokens: Int?
+        var model: String?
+        var lastUsageMessageID: String?
     }
 
     @discardableResult
@@ -130,8 +137,9 @@ final class Indexer {
             """
             INSERT INTO sessions(
                 id, path, cwd, custom_title, ai_title, last_prompt, first_prompt, first_ts, last_ts,
-                entrypoint, branch, pr_url, pr_number, msg_count, file_size, file_mtime, indexed_offset
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                entrypoint, branch, pr_url, pr_number, msg_count, file_size, file_mtime, indexed_offset,
+                tok_input, tok_cached, tok_output, context_tokens, model
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 path = excluded.path,
                 cwd = COALESCE(sessions.cwd, excluded.cwd),
@@ -148,13 +156,20 @@ final class Indexer {
                 msg_count = sessions.msg_count + excluded.msg_count,
                 file_size = excluded.file_size,
                 file_mtime = excluded.file_mtime,
-                indexed_offset = excluded.indexed_offset
+                indexed_offset = excluded.indexed_offset,
+                tok_input = sessions.tok_input + excluded.tok_input,
+                tok_cached = sessions.tok_cached + excluded.tok_cached,
+                tok_output = sessions.tok_output + excluded.tok_output,
+                context_tokens = COALESCE(excluded.context_tokens, sessions.context_tokens),
+                model = COALESCE(excluded.model, sessions.model)
             """,
             [
                 file.id, file.path, accumulator.cwd, accumulator.customTitle, accumulator.aiTitle,
                 accumulator.lastPrompt, accumulator.firstPrompt, accumulator.firstTimestamp,
                 accumulator.lastTimestamp, accumulator.entrypoint, accumulator.branch, accumulator.prURL,
                 accumulator.prNumber, accumulator.promptCount, file.size, file.mtime, consumed,
+                accumulator.inputTokens, accumulator.cachedTokens, accumulator.outputTokens,
+                accumulator.contextTokens, accumulator.model,
             ]
         )
         try db.exec("COMMIT")
@@ -256,6 +271,7 @@ final class Indexer {
 
         if isUser, object["isMeta"] as? Bool == true || object["isCompactSummary"] as? Bool == true { return }
         guard let message = object["message"] as? [String: Any] else { return }
+        if !isUser { recordUsage(message, &accumulator) }
 
         var texts: [String] = []
         if let content = message["content"] as? String {
@@ -276,6 +292,21 @@ final class Indexer {
             }
             try emit(isUser ? "u" : "a", trimmed, timestamp)
         }
+    }
+
+    /// Adds one assistant message's token usage. A message is written as several lines that
+    /// repeat the same usage, so it is counted once per message id.
+    private func recordUsage(_ message: [String: Any], _ accumulator: inout Accumulator) {
+        guard let usage = message["usage"] as? [String: Any], let id = message["id"] as? String,
+              id != accumulator.lastUsageMessageID else { return }
+        accumulator.lastUsageMessageID = id
+        let fresh = (usage["input_tokens"] as? Int ?? 0) + (usage["cache_creation_input_tokens"] as? Int ?? 0)
+        let cached = usage["cache_read_input_tokens"] as? Int ?? 0
+        accumulator.inputTokens += fresh
+        accumulator.cachedTokens += cached
+        accumulator.outputTokens += usage["output_tokens"] as? Int ?? 0
+        if fresh + cached > 0 { accumulator.contextTokens = fresh + cached }
+        if let model = message["model"] as? String, !model.hasPrefix("<") { accumulator.model = model }
     }
 
     private static let machinePrefixes = [

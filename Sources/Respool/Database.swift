@@ -162,7 +162,12 @@ enum Schema {
         msg_count INTEGER NOT NULL DEFAULT 0,
         file_size INTEGER NOT NULL DEFAULT 0,
         file_mtime REAL NOT NULL DEFAULT 0,
-        indexed_offset INTEGER NOT NULL DEFAULT 0
+        indexed_offset INTEGER NOT NULL DEFAULT 0,
+        tok_input INTEGER NOT NULL DEFAULT 0,
+        tok_cached INTEGER NOT NULL DEFAULT 0,
+        tok_output INTEGER NOT NULL DEFAULT 0,
+        context_tokens INTEGER,
+        model TEXT
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS messages USING fts5(
         text, session_id UNINDEXED, role UNINDEXED, ts UNINDEXED,
@@ -192,6 +197,25 @@ enum Schema {
     );
     CREATE TABLE IF NOT EXISTS organization_names(id TEXT PRIMARY KEY, name TEXT NOT NULL);
     """
+}
+
+extension Schema {
+    static let version = 2
+
+    /// Brings an index written by an older version up to date. The index only mirrors the
+    /// transcripts, so it is rebuilt rather than converted; pins, tasks and tags are kept.
+    static func migrate(_ db: Database) throws {
+        var current = 0
+        try db.query("PRAGMA user_version") { row in current = row.int(0) }
+        guard current < version else { return }
+        for column in [
+            "tok_input INTEGER NOT NULL DEFAULT 0", "tok_cached INTEGER NOT NULL DEFAULT 0",
+            "tok_output INTEGER NOT NULL DEFAULT 0", "context_tokens INTEGER", "model TEXT",
+        ] {
+            _ = try? db.exec("ALTER TABLE sessions ADD COLUMN \(column)")
+        }
+        try db.exec("DELETE FROM sessions; DELETE FROM messages; PRAGMA user_version = \(version);")
+    }
 }
 
 enum Paths {

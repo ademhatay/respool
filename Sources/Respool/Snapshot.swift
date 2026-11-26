@@ -9,6 +9,15 @@ enum Snapshot {
 
         let root = PanelView(library: library, close: {})
             .frame(width: size.width, height: size.height)
+            .overlay(alignment: .topLeading) {
+                if let hover = library.hover {
+                    DetailCard(library: library, subject: hover.subject)
+                        .background(Color(nsColor: dark ? NSColor(white: 0.2, alpha: 1) : NSColor(white: 0.98, alpha: 1)))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(.top, 120)
+                        .padding(.leading, 40)
+                }
+            }
             .background(Color(nsColor: dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.95, alpha: 1)))
             .clipShape(RoundedRectangle(cornerRadius: Metrics.panelRadius, style: .continuous))
             .padding(20)

@@ -12,6 +12,14 @@ struct SessionRecord: Identifiable, Hashable {
     var prNumber: Int?
     var prURL: String?
     var messageCount: Int
+    var firstActivity: Date?
+    var branch: String?
+    var fileSize = 0
+    var inputTokens = 0
+    var cachedTokens = 0
+    var outputTokens = 0
+    var contextTokens: Int?
+    var model: String?
     var projectKey: String = ""
     var projectName: String = ""
     var tagIDs: [Int64] = []
@@ -103,6 +111,54 @@ struct SearchHit: Identifiable, Hashable {
 struct Snippet: Hashable {
     var text: String
     var matches: [Range<Int>]
+}
+
+/// What the pointer is resting on, for the detail card that appears beside the panel.
+enum HoverSubject: Hashable {
+    case session(SessionRecord)
+    case project(ProjectGroup)
+}
+
+struct HoverTarget: Hashable {
+    var subject: HoverSubject
+    /// Vertical center of the row, measured down from the top of the panel.
+    var rowMidY: CGFloat
+}
+
+enum Format {
+    private static let dateTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "tr_TR")
+        formatter.dateFormat = "d MMM yyyy HH:mm"
+        return formatter
+    }()
+
+    static func tokens(_ count: Int) -> String {
+        if count >= 1_000_000_000 {
+            return String(format: "%.1f Mr", Double(count) / 1_000_000_000).replacingOccurrences(of: ".", with: ",")
+        }
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000).replacingOccurrences(of: ".", with: ",")
+        }
+        if count >= 10_000 { return "\(Int((Double(count) / 1000).rounded()))K" }
+        if count >= 1000 {
+            return String(format: "%.1fK", Double(count) / 1000).replacingOccurrences(of: ".", with: ",")
+        }
+        return "\(count)"
+    }
+
+    static func bytes(_ count: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
+    }
+
+    static func date(_ date: Date?) -> String {
+        date.map(dateTime.string(from:)) ?? "—"
+    }
+
+    static func path(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
 }
 
 enum RowKey {
