@@ -246,8 +246,30 @@ struct SessionOutline: Hashable {
     var entries: [OutlineEntry]
 }
 
+/// A line jotted down from anywhere, to be dealt with later.
+struct NoteItem: Identifiable, Hashable {
+    let id: Int64
+    var text: String
+    var created: Date?
+}
+
+/// The screen edge the panel opens from.
+enum PanelEdge: String, CaseIterable {
+    case right, left, top, bottom
+
+    var title: String {
+        switch self {
+        case .right: return L10n.edgeRight
+        case .left: return L10n.edgeLeft
+        case .top: return L10n.edgeTop
+        case .bottom: return L10n.edgeBottom
+        }
+    }
+}
+
 enum PanelSection {
     static let todos = "todos"
+    static let notes = "notes"
     static let pinned = "pinned"
     static let recent = "recent"
     static let week = "week"

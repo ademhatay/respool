@@ -177,6 +177,11 @@ enum Schema {
         cwd TEXT PRIMARY KEY, key TEXT NOT NULL, name TEXT NOT NULL, durable INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS pins(session_id TEXT PRIMARY KEY, position REAL NOT NULL);
+    CREATE TABLE IF NOT EXISTS notes(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT NOT NULL,
+        created REAL NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS tasks(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,

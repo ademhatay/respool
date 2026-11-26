@@ -10,21 +10,27 @@ struct Shortcut: Equatable {
 
     static let standard = Shortcut(keyCode: kVK_Space, modifiers: optionKey | shiftKey, label: "⌥⇧Space")
 
-    static func saved() -> Shortcut {
+    /// Opens the panel on the task field.
+    static let quickTask = Shortcut(keyCode: kVK_ANSI_T, modifiers: optionKey | shiftKey, label: "⌥⇧T")
+    /// Opens the panel on the note field.
+    static let quickNote = Shortcut(keyCode: kVK_ANSI_N, modifiers: optionKey | shiftKey, label: "⌥⇧N")
+
+    /// The shortcut saved under a name, or the fallback when none was ever recorded.
+    static func saved(as name: String, fallback: Shortcut) -> Shortcut {
         let defaults = UserDefaults.standard
-        guard let label = defaults.string(forKey: "shortcutLabel"), !label.isEmpty else { return .standard }
+        guard let label = defaults.string(forKey: name + "Label"), !label.isEmpty else { return fallback }
         return Shortcut(
-            keyCode: defaults.integer(forKey: "shortcutKeyCode"),
-            modifiers: defaults.integer(forKey: "shortcutModifiers"),
+            keyCode: defaults.integer(forKey: name + "KeyCode"),
+            modifiers: defaults.integer(forKey: name + "Modifiers"),
             label: label
         )
     }
 
-    func save() {
+    func save(as name: String) {
         let defaults = UserDefaults.standard
-        defaults.set(keyCode, forKey: "shortcutKeyCode")
-        defaults.set(modifiers, forKey: "shortcutModifiers")
-        defaults.set(label, forKey: "shortcutLabel")
+        defaults.set(keyCode, forKey: name + "KeyCode")
+        defaults.set(modifiers, forKey: name + "Modifiers")
+        defaults.set(label, forKey: name + "Label")
     }
 
     /// Builds a shortcut from a key press, or nil when it has no ⌘, ⌥ or ⌃ and would
@@ -62,7 +68,30 @@ struct Shortcut: Equatable {
     }
 }
 
-/// Registers the panel's system-wide shortcut. Uses the Carbon hot key API, which needs no
+/// Which of the app's system-wide shortcuts a hot key is. The raw value names its saved settings.
+enum ShortcutKind: String, CaseIterable {
+    case panel = "shortcut"
+    case quickTask = "taskShortcut"
+    case quickNote = "noteShortcut"
+
+    var fallback: Shortcut {
+        switch self {
+        case .panel: return .standard
+        case .quickTask: return .quickTask
+        case .quickNote: return .quickNote
+        }
+    }
+
+    fileprivate var identifier: UInt32 {
+        switch self {
+        case .panel: return 1
+        case .quickTask: return 2
+        case .quickNote: return 3
+        }
+    }
+}
+
+/// Registers one of the app's system-wide shortcuts. Uses the Carbon hot key API, which needs no
 /// permission prompt.
 final class HotKey {
     private var hotKeyRef: EventHotKeyRef?
@@ -70,17 +99,26 @@ final class HotKey {
     private let action: () -> Void
     private(set) var shortcut: Shortcut
     private(set) var isRegistered = false
+    let kind: ShortcutKind
 
-    init(action: @escaping () -> Void) {
+    init(_ kind: ShortcutKind = .panel, action: @escaping () -> Void) {
+        self.kind = kind
         self.action = action
-        shortcut = Shortcut.saved()
+        shortcut = Shortcut.saved(as: kind.rawValue, fallback: kind.fallback)
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let context = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(
             GetApplicationEventTarget(),
-            { _, _, context in
+            { _, event, context in
                 guard let context else { return noErr }
                 let hotKey = Unmanaged<HotKey>.fromOpaque(context).takeUnretainedValue()
+                // Every hot key's handler sees every press, so each answers only to its own.
+                var pressed = EventHotKeyID()
+                GetEventParameter(
+                    event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                    nil, MemoryLayout<EventHotKeyID>.size, nil, &pressed
+                )
+                guard pressed.id == hotKey.kind.identifier else { return OSStatus(eventNotHandledErr) }
                 DispatchQueue.main.async { hotKey.action() }
                 return noErr
             },
@@ -97,7 +135,7 @@ final class HotKey {
     @discardableResult
     func register() -> Bool {
         unregister()
-        let identifier = EventHotKeyID(signature: OSType(0x5253_504C), id: 1)
+        let identifier = EventHotKeyID(signature: OSType(0x5253_504C), id: kind.identifier)
         let status = RegisterEventHotKey(
             UInt32(shortcut.keyCode), UInt32(shortcut.modifiers), identifier,
             GetApplicationEventTarget(), 0, &hotKeyRef
@@ -118,7 +156,7 @@ final class HotKey {
         let previous = shortcut
         shortcut = new
         if register() {
-            new.save()
+            new.save(as: kind.rawValue)
             return true
         }
         shortcut = previous

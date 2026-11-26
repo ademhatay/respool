@@ -5,7 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var library: Library?
     private var controller: PanelController?
     private var statusItem: NSStatusItem?
-    private var hotKey: HotKey?
+    private var hotKeys: [HotKey] = []
     private var notifier: Notifier?
     private var observers = Set<AnyCancellable>()
 
@@ -92,9 +92,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.notifier = notifier
 
         installStatusItem()
-        let hotKey = HotKey { [weak controller] in controller?.toggle() }
-        library.hotKey = hotKey
-        self.hotKey = hotKey
+        // The quick shortcuts open the panel if it is closed, then put the cursor in their field.
+        func capture(_ action: @escaping (Library) -> Void) -> () -> Void {
+            { [weak controller, weak library] in
+                controller?.show()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    if let library { action(library) }
+                }
+            }
+        }
+        hotKeys = [
+            HotKey(.panel) { [weak controller] in controller?.toggle() },
+            HotKey(.quickTask, action: capture { $0.quickTask() }),
+            HotKey(.quickNote, action: capture { $0.quickNote() }),
+        ]
+        hotKeys.forEach(library.register)
 
         library.$attention
             .receive(on: RunLoop.main)

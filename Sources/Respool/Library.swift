@@ -112,7 +112,16 @@ final class Library: ObservableObject {
     @Published var notificationsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled") }
     }
-    @Published private(set) var recordingShortcut = false
+    /// The shortcut being recorded in Settings, if any.
+    @Published private(set) var recordingKind: ShortcutKind?
+    var recordingShortcut: Bool { recordingKind != nil }
+    /// Notes jotted down from anywhere, newest first.
+    @Published private(set) var notes: [NoteItem] = []
+    @Published var noteFocusRequest = 0
+    /// The screen edge the panel opens from. Takes effect the next time the panel opens.
+    @Published var panelEdge: PanelEdge {
+        didSet { UserDefaults.standard.set(panelEdge.rawValue, forKey: "panelEdge") }
+    }
     /// Off by default: most people have one organization and do not need the switcher.
     @Published var showsOrganizations: Bool {
         didSet {
@@ -130,9 +139,17 @@ final class Library: ObservableObject {
     @Published var renamingProject: String?
     @Published var focusRequest = 0
     /// Empty when the global shortcut could not be registered (another app owns it).
-    @Published var shortcutLabel = ""
-    var hotKey: HotKey? {
-        didSet { shortcutLabel = hotKey?.isRegistered == true ? hotKey!.shortcut.label : "" }
+    @Published var shortcutLabels: [ShortcutKind: String] = [:]
+    private var hotKeys: [ShortcutKind: HotKey] = [:]
+    /// The label of the shortcut that opens the panel, shown in the footer.
+    var shortcutLabel: String {
+        get { shortcutLabels[.panel] ?? "" }
+        set { shortcutLabels[.panel] = newValue }
+    }
+
+    func register(_ hotKey: HotKey) {
+        hotKeys[hotKey.kind] = hotKey
+        shortcutLabels[hotKey.kind] = hotKey.isRegistered ? hotKey.shortcut.label : ""
     }
     @Published private(set) var launchesAtLogin = LoginItem.isEnabled
 
@@ -171,6 +188,7 @@ final class Library: ObservableObject {
         userDB = try Database(path: Paths.database)
         expanded = Set(UserDefaults.standard.stringArray(forKey: "expandedProjects") ?? [])
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
+        panelEdge = UserDefaults.standard.string(forKey: "panelEdge").flatMap(PanelEdge.init) ?? .right
         showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true
         showsWeek = UserDefaults.standard.object(forKey: "showsWeek") as? Bool ?? true
         collapsedSections = Set(UserDefaults.standard.stringArray(forKey: "collapsedSections") ?? [])
@@ -195,6 +213,7 @@ final class Library: ObservableObject {
         var live: [String: LiveSession] = [:]
         var tags: [Tag] = []
         var tasks: [TaskItem] = []
+        var notes: [NoteItem] = []
         var organizations: [Organization] = []
         var tagged: [SessionRecord]?
         var week: [DaySummary] = []
@@ -244,6 +263,7 @@ final class Library: ObservableObject {
         ingestLive(snapshot.live)
         tags = snapshot.tags
         tasks = snapshot.tasks
+        notes = snapshot.notes
         week = snapshot.week
         organizations = snapshot.organizations
         tagged = snapshot.tagged
@@ -393,6 +413,11 @@ final class Library: ObservableObject {
         }
 
         var snapshot = Snapshot()
+        try? readDB.query("SELECT id, text, created FROM notes ORDER BY id DESC") { row in
+            if let text = row.text(1) {
+                snapshot.notes.append(NoteItem(id: Int64(row.int(0)), text: text, created: row.date(2)))
+            }
+        }
         snapshot.desktop = DesktopSessions.load()
         snapshot.live = LiveSessions.load()
 
@@ -1273,19 +1298,69 @@ final class Library: ObservableObject {
         }
     }
 
+    // MARK: - Quick capture
+
+    /// Brings the task field up, ready to type. Called by the quick-task shortcut.
+    func quickTask() {
+        taskLink = nil
+        showBrowseList()
+        showsTodos = true
+        collapsedSections.remove(PanelSection.todos)
+        todoFocusRequest += 1
+    }
+
+    /// Brings the note field up, ready to type. Called by the quick-note shortcut.
+    func quickNote() {
+        showBrowseList()
+        collapsedSections.remove(PanelSection.notes)
+        noteFocusRequest += 1
+    }
+
+    private func showBrowseList() {
+        query = ""
+        tagFilter = nil
+        showingSettings = false
+        outline = nil
+    }
+
+    func addNote(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        write { db in
+            try db.run("INSERT INTO notes(text, created) VALUES(?, ?)", [trimmed, Date().timeIntervalSince1970])
+        }
+    }
+
+    func delete(_ note: NoteItem) {
+        write { db in try db.run("DELETE FROM notes WHERE id = ?", [note.id]) }
+    }
+
+    /// Turns a note into a task for the selected day, and removes the note.
+    func makeTask(from note: NoteItem) {
+        let day = selectedDay
+        write { db in
+            try db.run(
+                "INSERT INTO tasks(session_id, text, done, created, due) VALUES('', ?, 0, ?, ?)",
+                [note.text, Date().timeIntervalSince1970, day]
+            )
+            try db.run("DELETE FROM notes WHERE id = ?", [note.id])
+        }
+    }
+
     // MARK: - Shortcut
 
-    /// Starts listening for the next key press, which becomes the new shortcut.
-    func beginShortcutRecording() {
-        hotKey?.unregister()
-        recordingShortcut = true
+    /// Starts listening for the next key press, which becomes the new shortcut of that kind.
+    func beginShortcutRecording(_ kind: ShortcutKind = .panel) {
+        cancelShortcutRecording()
+        hotKeys[kind]?.unregister()
+        recordingKind = kind
     }
 
     func cancelShortcutRecording() {
-        guard recordingShortcut else { return }
-        recordingShortcut = false
-        hotKey?.register()
-        shortcutLabel = hotKey?.isRegistered == true ? hotKey!.shortcut.label : ""
+        guard let kind = recordingKind else { return }
+        recordingKind = nil
+        hotKeys[kind]?.register()
+        shortcutLabels[kind] = hotKeys[kind]?.isRegistered == true ? hotKeys[kind]!.shortcut.label : ""
     }
 
     /// Handles a key press while recording. Escape cancels; a press without ⌘, ⌥ or ⌃ is refused.
@@ -1298,12 +1373,13 @@ final class Library: ObservableObject {
             show(notice: L10n.shortcutNeedsModifier)
             return
         }
-        recordingShortcut = false
-        guard let hotKey else { return }
+        guard let kind = recordingKind else { return }
+        recordingKind = nil
+        guard let hotKey = hotKeys[kind] else { return }
         if !hotKey.change(to: shortcut) {
             show(notice: L10n.shortcutTaken(shortcut.label))
         }
-        shortcutLabel = hotKey.isRegistered ? hotKey.shortcut.label : ""
+        shortcutLabels[kind] = hotKey.isRegistered ? hotKey.shortcut.label : ""
     }
 
     // MARK: - Tags
@@ -1459,5 +1535,108 @@ final class Library: ObservableObject {
         }
         let used = Set(candidates.map(\.id))
         recent = recent.filter { !used.contains($0.id) }
+    }
+}
+
+// MARK: - Demo data
+
+extension Library {
+    /// Fills an empty index with made-up projects, chats, tasks and notes, so screenshots show
+    /// the app without showing anyone's work. Only runs against an index named by RESPOOL_DB.
+    func seedDemo() {
+        guard ProcessInfo.processInfo.environment["RESPOOL_DB"] != nil else { return }
+        let now = Date().timeIntervalSince1970
+        let hour = 3600.0, day = 86_400.0
+        // project, title, hours since last activity, prompts, context tokens, custom title?
+        let chats: [(String, String, Double, Int, Int, Bool)] = [
+            ("storefront", "Checkout flow redesign", 0.2, 34, 412_000, true),
+            ("storefront", "Fix the cart total rounding", 3, 9, 96_000, false),
+            ("storefront", "Product page image loading", 27, 17, 188_000, false),
+            ("storefront", "Migrate to the new design tokens", 80, 41, 530_000, true),
+            ("billing-api", "Invoice PDF generation", 1.5, 22, 240_000, true),
+            ("billing-api", "Retry failed webhooks", 30, 12, 131_000, false),
+            ("billing-api", "Tax rules for EU customers", 52, 28, 305_000, false),
+            ("mobile-app", "Offline sync conflicts", 6, 19, 276_000, true),
+            ("mobile-app", "Push notification deep links", 49, 8, 74_000, false),
+            ("mobile-app", "Release checklist", 120, 6, 52_000, true),
+            ("docs", "Rewrite the getting started guide", 26, 14, 118_000, false),
+            ("docs", "API reference examples", 200, 7, 61_000, false),
+            ("infra", "Staging database upgrade", 75, 16, 162_000, true),
+            ("infra", "Reduce the CI build time", 300, 25, 210_000, false),
+        ]
+        let prompts = [
+            "Walk me through how this works today before changing anything",
+            "The invoice total is off by one cent when a discount applies, find out why",
+            "Add a test for that case and make it pass",
+            "Looks good, now do the same for the mobile client",
+            "Summarize what changed so I can write the release note",
+        ]
+        do {
+            try userDB.exec("BEGIN")
+            for (index, chat) in chats.enumerated() {
+                let id = String(format: "00000000-0000-4000-8000-%012d", index + 1)
+                let cwd = "/Users/demo/code/" + chat.0
+                let last = now - chat.2 * hour
+                let first = last - Double(chat.3) * 9 * 60
+                try userDB.run(
+                    """
+                    INSERT INTO sessions(id, path, cwd, custom_title, ai_title, last_prompt, first_prompt, first_ts, last_ts,
+                        entrypoint, branch, msg_count, file_size, file_mtime, indexed_offset,
+                        tok_input, tok_cached, tok_output, context_tokens, model)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'claude-desktop', ?, ?, ?, ?, 1, ?, ?, ?, ?, 'claude-opus-5-5')
+                    """,
+                    [
+                        id, "/demo/\(id).jsonl", cwd, chat.5 ? chat.1 : nil, chat.1, prompts[index % prompts.count],
+                        prompts[0], first, last, index % 3 == 0 ? "main" : "feature/\(chat.0)", chat.3,
+                        chat.4 * 14, last, chat.4 * 2, chat.4 * 90, chat.4 / 3, chat.4,
+                    ]
+                )
+                try userDB.run(
+                    "INSERT OR REPLACE INTO cwd_projects(cwd, key, name, durable) VALUES(?, ?, ?, 1)",
+                    [cwd, "git:acme/" + chat.0, chat.0]
+                )
+                for step in 0..<chat.3 {
+                    let stamp = first + (last - first) * Double(step) / Double(max(chat.3 - 1, 1))
+                    try userDB.run(
+                        "INSERT INTO messages(text, session_id, role, ts) VALUES(?, ?, 'u', ?)",
+                        [prompts[(index + step) % prompts.count], id, stamp]
+                    )
+                }
+            }
+            let ids = chats.indices.map { String(format: "00000000-0000-4000-8000-%012d", $0 + 1) }
+            for (position, pinned) in [0, 4, 7].enumerated() {
+                try userDB.run("INSERT INTO pins(session_id, position) VALUES(?, ?)", [ids[pinned], Double(position)])
+            }
+            let today = Format.dayKey(Date())
+            let tomorrow = Format.dayKey(Date().addingTimeInterval(day))
+            let tasks: [(String, String, String?, String?, Bool)] = [
+                ("Test the checkout on a slow connection", ids[0], today, nil, false),
+                ("Send the invoice template to finance", "", today, nil, true),
+                ("Decide on the retry limit", ids[5], today, nil, false),
+                ("Draft the release note", "", tomorrow, "git:acme/mobile-app", false),
+                ("Read the tax ruling", "", nil, nil, false),
+            ]
+            for task in tasks {
+                try userDB.run(
+                    "INSERT INTO tasks(session_id, text, done, created, done_at, due, project_key) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                    [task.1, task.0, task.4, now, task.4 ? now : nil, task.2, task.3]
+                )
+            }
+            for (name, color, tagged) in [("urgent", 0, 0), ("customer", 4, 4), ("research", 5, 7)] {
+                try userDB.run("INSERT INTO tags(name, color) VALUES(?, ?)", [name, color])
+                try userDB.run(
+                    "INSERT INTO session_tags(session_id, tag_id) SELECT ?, id FROM tags WHERE name = ?", [ids[tagged], name]
+                )
+            }
+            for (offset, note) in ["Ask Dana about the staging credentials", "Idea: show the cart total while typing a coupon"].enumerated() {
+                try userDB.run("INSERT INTO notes(text, created) VALUES(?, ?)", [note, now - Double(offset + 1) * hour])
+            }
+            try userDB.exec("COMMIT")
+        } catch {
+            _ = try? userDB.exec("ROLLBACK")
+            print("demo data failed: \(error)")
+        }
+        expanded = ["git:acme/storefront"]
+        reloadSync()
     }
 }

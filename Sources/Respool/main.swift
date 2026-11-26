@@ -134,8 +134,11 @@ if let output = value(after: "--snapshot") {
             for day in library.week { library.dayFold[day.day] = true }
         }
         library.reloadSync()
+        if arguments.contains("--demo") { library.seedDemo() }
         if arguments.contains("--settings") {
             library.shortcutLabel = Shortcut.standard.label
+            library.shortcutLabels[.quickTask] = Shortcut.quickTask.label
+            library.shortcutLabels[.quickNote] = Shortcut.quickNote.label
             library.showsOrganizations = arguments.contains("--accounts")
             library.reloadSync()
             library.showingSettings = true
@@ -550,6 +553,27 @@ if arguments.contains("--selftest") {
         library.ingestLive([:])
         check("a session that exits is forgotten", library.attention.isEmpty)
         library.onAttention = nil
+
+        library.addNote("müşteriye dönüş yap"); settle()
+        check("note saved", library.notes.map(\.text) == ["müşteriye dönüş yap"])
+        let tasksBefore = library.tasks.count
+        library.makeTask(from: library.notes[0]); settle()
+        check("note becomes a task", library.notes.isEmpty && library.tasks.count == tasksBefore + 1)
+        if let made = library.tasks.first(where: { $0.text == "müşteriye dönüş yap" }) { library.delete(made); settle() }
+        library.addNote("silinecek not"); settle()
+        library.delete(library.notes[0]); settle()
+        check("note deleted", library.notes.isEmpty)
+        library.query = "x"; library.quickNote()
+        check("quick note clears the search and asks for focus", library.query.isEmpty && library.noteFocusRequest > 0)
+        library.quickTask()
+        check("quick task asks for focus", library.todoFocusRequest > 0 && library.taskLink == nil)
+        check("shortcut kinds save under their own names",
+              Set(ShortcutKind.allCases.map(\.rawValue)).count == 3 && ShortcutKind.quickTask.fallback != ShortcutKind.quickNote.fallback)
+        let screen = NSRect(x: 0, y: 0, width: 1470, height: 900)
+        let frames = PanelEdge.allCases.map { PanelController.frame(for: $0, in: screen) }
+        check("every edge keeps the panel on the screen", frames.allSatisfy { screen.contains($0) })
+        check("each edge touches its own side",
+              frames[0].maxX > 1400 && frames[1].minX < 20 && frames[2].maxY > 880 && frames[3].minY < 20)
 
         library.togglePin(session); settle()
         check("unpin", library.pinned.isEmpty)

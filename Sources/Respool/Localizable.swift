@@ -373,6 +373,23 @@ enum L10n {
     /// Days in the short form the list uses, as in "3 d".
     static func shortDays(_ figure: Int) -> String { tr("\(figure) gün", "\(figure) d") }
 
+    // MARK: Notes and quick capture
+
+    static var notesTitle: String { tr("Notlar", "Notes") }
+    static var notePlaceholder: String { tr("Not yaz", "Write a note") }
+    static var turnIntoTask: String { tr("Göreve çevir", "Turn into a task") }
+    static var deleteNote: String { tr("Notu sil", "Delete the note") }
+    static var noteCopied: String { tr("Not kopyalandı", "Note copied") }
+    static var quickTaskShortcut: String { tr("Hızlı görev", "Quick task") }
+    static var quickNoteShortcut: String { tr("Hızlı not", "Quick note") }
+    static var openPanelShortcut: String { tr("Paneli aç", "Open the panel") }
+
+    static var panelPosition: String { tr("Panel konumu", "Panel position") }
+    static var edgeRight: String { tr("Sağ", "Right") }
+    static var edgeLeft: String { tr("Sol", "Left") }
+    static var edgeTop: String { tr("Üst", "Top") }
+    static var edgeBottom: String { tr("Alt", "Bottom") }
+
     static var terminalFailed: String { tr("Terminal açılamadı", "The terminal could not be opened") }
 
     // MARK: Figures

@@ -7,11 +7,13 @@ enum PanelField: Hashable {
     case tagName
     case organization(String)
     case todo
+    case note
 }
 
 /// Places in the panel's list that are scrolled to by name.
 enum ScrollAnchor: Hashable {
     static let top = "top"
+    static let notes = "notes-section"
 }
 
 struct PanelView: View {
@@ -171,6 +173,10 @@ struct PanelView: View {
                     proxy.scrollTo(ScrollAnchor.top, anchor: .top)
                     DispatchQueue.main.async { focus = .todo }
                 }
+                .onChange(of: library.noteFocusRequest) { _, _ in
+                    proxy.scrollTo(ScrollAnchor.notes, anchor: .top)
+                    DispatchQueue.main.async { focus = .note }
+                }
             }
         }
     }
@@ -179,6 +185,8 @@ struct PanelView: View {
         if library.showsTodos {
             TodoSection(library: library, focus: $focus)
         }
+
+        NotesSection(library: library, focus: $focus)
 
         if !library.pinned.isEmpty {
             CollapsibleHeader(
@@ -897,6 +905,101 @@ struct TaskCalendar: View {
         .buttonStyle(.plain)
         .onHover { inside in hovering = inside ? date : (hovering == date ? nil : hovering) }
         .help(Format.day(date))
+    }
+}
+
+// MARK: - Notes
+
+/// Lines jotted down from anywhere with the quick-note shortcut, newest first.
+struct NotesSection: View {
+    @ObservedObject var library: Library
+    var focus: FocusState<PanelField?>.Binding
+
+    @State private var draft = ""
+
+    var body: some View {
+        CollapsibleHeader(
+            library: library, title: L10n.notesTitle,
+            section: PanelSection.notes, count: library.notes.count
+        )
+        .id(ScrollAnchor.notes)
+        if !library.isCollapsed(PanelSection.notes) {
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 14)
+                TextField(L10n.notePlaceholder, text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused(focus, equals: .note)
+                    .onSubmit {
+                        library.addNote(draft)
+                        draft = ""
+                        DispatchQueue.main.async { focus.wrappedValue = .note }
+                    }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            ForEach(library.notes) { note in
+                NoteRow(library: library, note: note)
+            }
+        }
+    }
+}
+
+struct NoteRow: View {
+    @ObservedObject var library: Library
+    let note: NoteItem
+
+    @State private var hovering = false
+    @State private var expanded = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(note.text)
+                    .font(.system(size: 12))
+                    .lineLimit(expanded ? nil : 3)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let created = note.created {
+                    Text(Format.shortDate(created))
+                        .font(.system(size: 10))
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer(minLength: 4)
+            Button {
+                library.delete(note)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.deleteNote)
+            .opacity(hovering ? 1 : 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(hovering ? 0.07 : 0))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture { expanded.toggle() }
+        .contextMenu {
+            Button(L10n.copy) {
+                Opener.copy(note.text)
+                library.show(notice: L10n.noteCopied)
+            }
+            Button(L10n.turnIntoTask) { library.makeTask(from: note) }
+            Divider()
+            Button(L10n.deleteNote, role: .destructive) { library.delete(note) }
+        }
     }
 }
 
@@ -1870,7 +1973,23 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     SettingsGroup {
-                        SettingsRow(title: L10n.shortcut) { shortcutButton }
+                        VStack(spacing: 0) {
+                            SettingsRow(title: L10n.openPanelShortcut) { shortcutButton(.panel) }
+                            SettingsRow(title: L10n.quickTaskShortcut) { shortcutButton(.quickTask) }
+                            SettingsRow(title: L10n.quickNoteShortcut) { shortcutButton(.quickNote) }
+                        }
+                    }
+                    SettingsGroup {
+                        SettingsRow(title: L10n.panelPosition) {
+                            Picker(L10n.panelPosition, selection: $library.panelEdge) {
+                                ForEach(PanelEdge.allCases, id: \.self) { edge in
+                                    Text(edge.title).tag(edge)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .fixedSize()
+                        }
                     }
                     SettingsGroup {
                         SettingsRow(title: L10n.launchAtLogin) {
@@ -1971,37 +2090,39 @@ struct SettingsView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    private var shortcutButton: some View {
-        Button {
-            if library.recordingShortcut {
+    private func shortcutButton(_ kind: ShortcutKind) -> some View {
+        let recording = library.recordingKind == kind
+        return Button {
+            if recording {
                 library.cancelShortcutRecording()
             } else {
-                library.beginShortcutRecording()
+                library.beginShortcutRecording(kind)
             }
         } label: {
-            Text(shortcutText)
+            Text(shortcutText(kind))
                 .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
-                .foregroundStyle(library.recordingShortcut ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.primary))
+                .foregroundStyle(recording ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.primary))
                 .padding(.horizontal, 10)
                 .frame(minWidth: 96, minHeight: 24)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.primary.opacity(library.recordingShortcut ? 0.04 : 0.09))
+                        .fill(Color.primary.opacity(recording ? 0.04 : 0.09))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(Color.accentColor.opacity(library.recordingShortcut ? 0.8 : 0), lineWidth: 1.5)
+                        .strokeBorder(Color.accentColor.opacity(recording ? 0.8 : 0), lineWidth: 1.5)
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(library.recordingShortcut ? L10n.escToCancel : L10n.changeShortcut)
+        .help(recording ? L10n.escToCancel : L10n.changeShortcut)
     }
 
-    private var shortcutText: String {
-        if library.recordingShortcut { return L10n.pressKeys }
-        return library.shortcutLabel.isEmpty ? L10n.notAssigned : library.shortcutLabel
+    private func shortcutText(_ kind: ShortcutKind) -> String {
+        if library.recordingKind == kind { return L10n.pressKeys }
+        let label = library.shortcutLabels[kind] ?? ""
+        return label.isEmpty ? L10n.notAssigned : label
     }
 }
 

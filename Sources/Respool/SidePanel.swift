@@ -21,6 +21,8 @@ final class PanelController: NSObject, NSWindowDelegate {
     private var keyMonitor: Any?
     private var lastHidden = Date.distantPast
     private var liveTimer: Timer?
+    /// How far, and which way, the panel travels as it opens and closes.
+    private var slide = CGSize(width: 24, height: 0)
     private let detailPanel: NSPanel
     private let detailBackdrop = NSVisualEffectView()
     private var hoverObserver: AnyCancellable?
@@ -101,14 +103,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         guard !isShown else { return }
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
-        let visible = screen.visibleFrame
-        let target = NSRect(
-            x: visible.maxX - Metrics.panelWidth - Metrics.screenInset,
-            y: visible.minY + Metrics.screenInset,
-            width: Metrics.panelWidth,
-            height: visible.height - Metrics.screenInset * 2
-        )
-        panel.setFrame(target.offsetBy(dx: 24, dy: 0), display: true)
+        let edge = library.panelEdge
+        let target = Self.frame(for: edge, in: screen.visibleFrame)
+        slide = Self.slide(for: edge)
+        panel.setFrame(target.offsetBy(dx: slide.width, dy: slide.height), display: true)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         panel.makeKey()
@@ -136,7 +134,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         liveTimer?.invalidate()
         liveTimer = nil
         library.hover = nil
-        let frame = panel.frame.offsetBy(dx: 24, dy: 0)
+        let frame = panel.frame.offsetBy(dx: slide.width, dy: slide.height)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.14
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -165,7 +163,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         let visible = screen.visibleFrame
         let y = min(max(target.screenY - size.height / 2, visible.minY + Metrics.screenInset),
                     visible.maxY - size.height - Metrics.screenInset)
-        let frame = NSRect(x: panel.frame.minX - size.width - 8, y: y, width: size.width, height: size.height)
+        // Beside the panel, on whichever side has room.
+        let leftX = panel.frame.minX - size.width - 8
+        let x = leftX >= visible.minX ? leftX : panel.frame.maxX + 8
+        let frame = NSRect(x: x, y: y, width: size.width, height: size.height)
         let wasVisible = detailPanel.isVisible
         detailPanel.setFrame(frame, display: true)
         if !wasVisible {
@@ -177,6 +178,35 @@ final class PanelController: NSObject, NSWindowDelegate {
             }
         }
         detailPanel.invalidateShadow()
+    }
+
+    /// Where the panel sits for an edge. At the sides it runs the height of the screen; at the
+    /// top and bottom it keeps its width, centered, and takes about two thirds of the height.
+    static func frame(for edge: PanelEdge, in visible: NSRect) -> NSRect {
+        let inset = Metrics.screenInset
+        let width = Metrics.panelWidth
+        let fullHeight = visible.height - inset * 2
+        let partHeight = min(fullHeight, max(480, (visible.height * 0.66).rounded()))
+        switch edge {
+        case .right:
+            return NSRect(x: visible.maxX - width - inset, y: visible.minY + inset, width: width, height: fullHeight)
+        case .left:
+            return NSRect(x: visible.minX + inset, y: visible.minY + inset, width: width, height: fullHeight)
+        case .top:
+            return NSRect(x: visible.midX - width / 2, y: visible.maxY - partHeight - inset, width: width, height: partHeight)
+        case .bottom:
+            return NSRect(x: visible.midX - width / 2, y: visible.minY + inset, width: width, height: partHeight)
+        }
+    }
+
+    /// The offset the panel starts from, away from the screen, so it slides in from its edge.
+    static func slide(for edge: PanelEdge) -> CGSize {
+        switch edge {
+        case .right: return CGSize(width: 24, height: 0)
+        case .left: return CGSize(width: -24, height: 0)
+        case .top: return CGSize(width: 0, height: 24)
+        case .bottom: return CGSize(width: 0, height: -24)
+        }
     }
 
     func windowDidResignKey(_ notification: Notification) {

@@ -10,6 +10,17 @@ Respool is an independent project and is not affiliated with Anthropic.
 
 > The interface is in English and Turkish, and follows your system language.
 
+<p align="center">
+  <img src="docs/panel.png" width="300" alt="The panel: to-dos, notes, pinned and recent chats">
+  <img src="docs/detail.png" width="300" alt="The detail card: context, tokens and activity">
+</p>
+<p align="center">
+  <img src="docs/search.png" width="300" alt="Searching inside chats">
+  <img src="docs/settings.png" width="300" alt="Settings">
+</p>
+
+The screenshots show made-up data.
+
 ## What it does
 
 - **Search.** Searches session titles and the conversations themselves, and shows an excerpt
@@ -33,6 +44,7 @@ Respool is an independent project and is not affiliated with Anthropic.
 - **Week.** A summary of the week so far: a row for each day with the sessions used that day and
   how many prompts went into each. A day opens onto its sessions; today is open to begin with.
   The summary can be turned off in Settings.
+- **Notes.** Jot a line down from anywhere with the quick-note shortcut; turn it into a task later.
 - **Notifications.** When a session finishes or starts waiting for you, Respool posts a
   notification and shows a count next to its menu bar icon. Clicking the notification opens
   the session.
@@ -59,12 +71,16 @@ Respool is an independent project and is not affiliated with Anthropic.
 
 | Key | Action |
 |---|---|
-| `⌥⇧Space` | Open or close the panel (change it in Settings) |
+| `⌥⇧Space` | Open or close the panel (all three shortcuts can be changed in Settings) |
+| `⌥⇧T` | Open the panel on the task field |
+| `⌥⇧N` | Open the panel on the note field |
 | `↑` `↓` | Move through sessions |
 | `↩` | Open the selected session |
 | `esc` | Clear the search, then close the panel |
 
 Hover a session for the pin button; everything else is in its context menu.
+
+The panel opens from the right edge by default; Settings can move it to the left, top or bottom.
 
 ## Install
 
@@ -109,6 +125,7 @@ against Claude Code 2.1.332. The index, pins, tasks and tags live in
 .build/release/Respool --index --query "some phrase"       # update the index and try a search
 .build/release/Respool --snapshot panel.png --dark         # draw the panel to an image
 RESPOOL_DB=/tmp/test.db .build/release/Respool --selftest  # pins, tasks, tags and filters
+RESPOOL_DB=/tmp/demo.db .build/release/Respool --snapshot docs/panel.png --demo --lang en --dark  # screenshot with made-up data
 swift scripts/make-icon.swift                              # regenerate the app icon
 ```
 
