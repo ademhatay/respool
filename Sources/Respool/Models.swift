@@ -79,6 +79,17 @@ struct TaskItem: Identifiable, Hashable {
     var text: String
     var done: Bool
     var doneAt: Date?
+    /// For a to-do that belongs to no session: "today" or "week".
+    var bucket: String?
+}
+
+enum TodoBucket {
+    static let today = "today"
+    static let week = "week"
+
+    static func title(_ bucket: String) -> String {
+        bucket == week ? "Bu hafta" : "Bugün"
+    }
 }
 
 struct PinnedSession: Identifiable, Hashable {

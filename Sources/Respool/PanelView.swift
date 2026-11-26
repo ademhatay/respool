@@ -6,6 +6,7 @@ enum PanelField: Hashable {
     case rename(String)
     case tagName
     case organization(String)
+    case todo
 }
 
 struct PanelView: View {
@@ -160,6 +161,10 @@ struct PanelView: View {
     }
 
     @ViewBuilder private var browseRows: some View {
+        if library.showsTodos {
+            TodoSection(library: library, focus: $focus)
+        }
+
         if !library.pinned.isEmpty {
             SectionHeader(title: "Sabitlenenler")
             ForEach(library.pinned) { item in
@@ -386,7 +391,10 @@ struct SessionRow: View {
             ZStack(alignment: .trailing) {
                 HStack(spacing: 6) {
                     if let live {
-                        LiveIndicator(live: live, selected: style.selected)
+                        LiveIndicator(
+                            live: live, selected: style.selected,
+                            finished: library.attention.contains(session.id)
+                        )
                     }
                     Text(RelativeTime.short(session.lastActivity))
                         .font(.system(size: 11))
@@ -463,6 +471,8 @@ struct SessionRow: View {
 struct LiveIndicator: View {
     let live: LiveSession
     let selected: Bool
+    /// The session finished its work and has not been looked at since.
+    var finished = false
 
     var body: some View {
         switch live.state {
@@ -477,9 +487,75 @@ struct LiveIndicator: View {
                 .frame(width: 7, height: 7)
         case .idle:
             Circle()
-                .fill(selected ? Color.white : Color.accentColor)
+                .fill(selected ? Color.white : (finished ? Color.green : Color.accentColor))
                 .frame(width: 7, height: 7)
         }
+    }
+}
+
+// MARK: - To-dos
+
+/// To-dos that belong to no session, split into today and this week.
+struct TodoSection: View {
+    @ObservedObject var library: Library
+    var focus: FocusState<PanelField?>.Binding
+
+    @State private var draft = ""
+
+    var body: some View {
+        SectionHeader(title: "Yapılacaklar")
+        ForEach([TodoBucket.today, TodoBucket.week], id: \.self) { bucket in
+            let items = library.todos(in: bucket)
+            if !items.isEmpty {
+                Text(TodoBucket.title(bucket))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 8)
+                    .padding(.top, bucket == TodoBucket.today ? 0 : 6)
+                    .padding(.bottom, 1)
+                ForEach(items) { todo in
+                    TaskRow(library: library, task: todo)
+                        .contextMenu {
+                            let other = bucket == TodoBucket.today ? TodoBucket.week : TodoBucket.today
+                            Button("\(TodoBucket.title(other)) listesine taşı") { library.move(todo, to: other) }
+                            Divider()
+                            Button("Sil", role: .destructive) { library.delete(todo) }
+                        }
+                }
+            }
+        }
+        addRow
+    }
+
+    private var addRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "plus")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .frame(width: 14)
+            TextField("Görev ekle", text: $draft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused(focus, equals: .todo)
+                .onSubmit {
+                    library.addTodo(draft)
+                    draft = ""
+                    DispatchQueue.main.async { focus.wrappedValue = .todo }
+                }
+            Menu {
+                Button(TodoBucket.title(TodoBucket.today)) { library.todoBucket = TodoBucket.today }
+                Button(TodoBucket.title(TodoBucket.week)) { library.todoBucket = TodoBucket.week }
+            } label: {
+                Text(TodoBucket.title(library.todoBucket))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Yeni görevin ekleneceği liste")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
     }
 }
 
@@ -1104,6 +1180,22 @@ struct SettingsView: View {
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .controlSize(.small)
+                        }
+                    }
+                    SettingsGroup {
+                        SettingsRow(title: "Bildirimler") {
+                            Toggle("", isOn: $library.notificationsEnabled)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                        }
+                    }
+                    SettingsGroup {
+                        SettingsRow(title: "Yapılacakları göster") {
+                            Toggle("", isOn: $library.showsTodos)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
                         }
                     }
                     SettingsGroup {

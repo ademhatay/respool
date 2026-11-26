@@ -61,6 +61,16 @@ if let output = value(after: "--snapshot") {
             if arguments.contains("--filter-tag") { library.tagFilter = library.tags.first?.id }
             library.reloadSync()
         }
+        if arguments.contains("--seed-todos"), ProcessInfo.processInfo.environment["RESPOOL_DB"] != nil {
+            for (text, bucket) in [("Vernal gecikmesini müşteriye yaz", TodoBucket.today), ("Faturaları gönder", TodoBucket.today), ("Sunucu yedeğini kontrol et", TodoBucket.week)] {
+                library.todoBucket = bucket
+                library.addTodo(text)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+            }
+            library.todoBucket = TodoBucket.today
+            library.reloadSync()
+            if let first = library.todos.first { library.toggle(first); RunLoop.main.run(until: Date().addingTimeInterval(0.3)); library.reloadSync() }
+        }
         if arguments.contains("--settings") {
             library.shortcutLabel = Shortcut.standard.label
             library.showsOrganizations = arguments.contains("--accounts")
@@ -175,6 +185,44 @@ if arguments.contains("--selftest") {
             library.showsOrganizations = false; settle()
             check("turning accounts off clears the filter", library.organizationFilter == nil && library.sessionCount == everything)
         }
+
+        library.addTodo("faturaları gönder")
+        library.todoBucket = TodoBucket.week
+        library.addTodo("sunucu yedeğini kontrol et"); settle()
+        check("to-dos land in their lists", library.todos(in: TodoBucket.today).map(\.text) == ["faturaları gönder"]
+            && library.todos(in: TodoBucket.week).map(\.text) == ["sunucu yedeğini kontrol et"])
+        check("to-dos stay out of session tasks", library.pinned.allSatisfy { $0.tasks.allSatisfy { !$0.sessionID.isEmpty } })
+        library.move(library.todos(in: TodoBucket.week)[0], to: TodoBucket.today); settle()
+        check("to-do moved to today", library.todos(in: TodoBucket.today).count == 2 && library.todos(in: TodoBucket.week).isEmpty)
+        library.toggle(library.todos[0]); settle()
+        check("done to-do sorts last", library.todos.map(\.done) == [false, true])
+        for todo in library.todos { library.delete(todo) }
+        settle()
+        check("to-dos deleted", library.todos.isEmpty)
+
+        var announced: [LiveSession.State] = []
+        library.finishThreshold = 0
+        library.onAttention = { _, _, live in announced.append(live.state) }
+        func live(_ state: LiveSession.State) -> [String: LiveSession] {
+            ["probe": LiveSession(pid: 1, state: state, waitingFor: nil, desktopID: nil)]
+        }
+        library.ingestLive(live(.working))
+        check("working is not announced", announced.isEmpty && library.attention.isEmpty)
+        library.ingestLive(live(.idle))
+        check("finishing is announced", announced == [.idle] && library.attention == ["probe"])
+        library.ingestLive(live(.working))
+        check("working again clears attention", library.attention.isEmpty)
+        library.ingestLive(live(.waiting))
+        check("waiting is announced", announced == [.idle, .waiting] && library.attention == ["probe"])
+        library.ingestLive(live(.waiting))
+        check("waiting is announced once", announced.count == 2)
+        library.notificationsEnabled = false
+        library.ingestLive(live(.working)); library.ingestLive(live(.idle))
+        check("no announcement when notifications are off", announced.count == 2 && library.attention == ["probe"])
+        library.notificationsEnabled = true
+        library.ingestLive([:])
+        check("a session that exits is forgotten", library.attention.isEmpty)
+        library.onAttention = nil
 
         library.togglePin(session); settle()
         check("unpin", library.pinned.isEmpty)

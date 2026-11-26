@@ -22,6 +22,10 @@ final class Library: ObservableObject {
     @Published private(set) var notice: String?
     @Published private(set) var live: [String: LiveSession] = [:]
     @Published private(set) var tags: [Tag] = []
+    /// To-dos that belong to no session, in the order they were added.
+    @Published private(set) var todos: [TaskItem] = []
+    /// Sessions that are waiting for the user, or finished while the user was not looking.
+    @Published private(set) var attention: Set<String> = []
     @Published private(set) var organizations: [Organization] = []
     /// Sessions carrying the selected tag, newest first; nil when no tag is selected.
     @Published private(set) var tagged: [SessionRecord]?
@@ -49,6 +53,13 @@ final class Library: ObservableObject {
     /// Activity over time for the hovered row; arrives a moment after `hover` is set.
     @Published private(set) var hoverActivity: ActivitySeries?
     @Published var showingSettings = false
+    @Published var todoBucket = TodoBucket.today
+    @Published var showsTodos: Bool {
+        didSet { UserDefaults.standard.set(showsTodos, forKey: "showsTodos") }
+    }
+    @Published var notificationsEnabled: Bool {
+        didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled") }
+    }
     @Published private(set) var recordingShortcut = false
     /// Off by default: most people have one organization and do not need the switcher.
     @Published var showsOrganizations: Bool {
@@ -76,6 +87,13 @@ final class Library: ObservableObject {
     var searchFocused = true
     var onOpen: ((SessionRecord) -> Void)?
     var onOpenInDesktop: ((SessionRecord) -> Void)?
+    /// Called when a session starts waiting or finishes its work.
+    var onAttention: ((String, SessionRecord?, LiveSession) -> Void)?
+    /// How long a session must have worked before its finishing is worth announcing.
+    var finishThreshold: TimeInterval = 8
+    private var workingSince: [String: Date] = [:]
+    private var hasSeenLive = false
+    private var monitor: Timer?
 
     private let readDB: Database
     private let userDB: Database
@@ -94,10 +112,13 @@ final class Library: ObservableObject {
         indexDB = try Database(path: Paths.database)
         try indexDB.exec(Schema.sql)
         try Schema.migrate(indexDB)
+        Schema.addColumns(indexDB)
         readDB = try Database(path: Paths.database)
         userDB = try Database(path: Paths.database)
         expanded = Set(UserDefaults.standard.stringArray(forKey: "expandedProjects") ?? [])
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
+        showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true
+        notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         organizationFilter = showsOrganizations ? UserDefaults.standard.string(forKey: "organizationFilter") : nil
     }
 
@@ -111,6 +132,7 @@ final class Library: ObservableObject {
         var desktop = DesktopSessions.Index()
         var live: [String: LiveSession] = [:]
         var tags: [Tag] = []
+        var todos: [TaskItem] = []
         var organizations: [Organization] = []
         var tagged: [SessionRecord]?
     }
@@ -135,8 +157,9 @@ final class Library: ObservableObject {
     private func apply(_ snapshot: Snapshot) {
         allSessions = snapshot.sessions
         desktop = snapshot.desktop
-        live = snapshot.live
+        ingestLive(snapshot.live)
         tags = snapshot.tags
+        todos = snapshot.todos
         organizations = snapshot.organizations
         tagged = snapshot.tagged
         if let tagFilter, !snapshot.tags.contains(where: { $0.id == tagFilter }) { self.tagFilter = nil }
@@ -309,14 +332,19 @@ final class Library: ObservableObject {
         var tasksBySession: [String: [TaskItem]] = [:]
         let cutoff = Date().addingTimeInterval(-86_400).timeIntervalSince1970
         try? readDB.query(
-            "SELECT id, session_id, text, done, done_at FROM tasks WHERE done = 0 OR done_at > ? ORDER BY done, id",
+            "SELECT id, session_id, text, done, done_at, bucket FROM tasks WHERE done = 0 OR done_at > ? ORDER BY done, id",
             [cutoff]
         ) { row in
             guard let sessionID = row.text(1), let text = row.text(2) else { return }
             let task = TaskItem(
-                id: Int64(row.int(0)), sessionID: sessionID, text: text, done: row.int(3) == 1, doneAt: row.date(4)
+                id: Int64(row.int(0)), sessionID: sessionID, text: text, done: row.int(3) == 1,
+                doneAt: row.date(4), bucket: row.text(5)
             )
-            tasksBySession[sessionID, default: []].append(task)
+            if sessionID.isEmpty {
+                snapshot.todos.append(task)
+            } else {
+                tasksBySession[sessionID, default: []].append(task)
+            }
         }
         var pinnedIDs: [String] = []
         try? readDB.query("SELECT session_id FROM pins ORDER BY position") { row in
@@ -489,6 +517,7 @@ final class Library: ObservableObject {
 
     func open(_ session: SessionRecord) {
         hover = nil
+        attention.remove(session.id)
         onOpen?(session)
     }
 
@@ -513,10 +542,7 @@ final class Library: ObservableObject {
     func refreshLive() {
         readQueue.async { [weak self] in
             let current = LiveSessions.load()
-            DispatchQueue.main.async {
-                guard let self, self.live != current else { return }
-                self.live = current
-            }
+            DispatchQueue.main.async { self?.ingestLive(current) }
         }
     }
 
@@ -542,6 +568,11 @@ final class Library: ObservableObject {
             focusRequest += 1
             return false
         }
+        if !searchFocused {
+            // Escape in any other field goes back to the search field first.
+            focusRequest += 1
+            return false
+        }
         if !query.isEmpty {
             query = ""
             return false
@@ -552,6 +583,8 @@ final class Library: ObservableObject {
     func panelDidOpen() {
         selection = nil
         hover = nil
+        // Opening the panel counts as seeing what finished; sessions still waiting stay marked.
+        attention = attention.filter { live[$0]?.state == .waiting }
         addingTaskFor = nil
         renamingProject = nil
         tagEditor = nil
@@ -618,6 +651,85 @@ final class Library: ObservableObject {
 
     func delete(_ task: TaskItem) {
         write { db in try db.run("DELETE FROM tasks WHERE id = ?", [task.id]) }
+    }
+
+    // MARK: - Attention
+
+    /// Keeps watching running sessions while the panel is closed.
+    func startMonitoring() {
+        monitor?.invalidate()
+        monitor = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            self?.refreshLive()
+        }
+    }
+
+    /// Takes a fresh reading of the running sessions and works out which ones now need the user:
+    /// a session that started waiting, or one that worked for a while and then stopped.
+    func ingestLive(_ current: [String: LiveSession], now: Date = Date()) {
+        defer { if live != current { live = current } }
+        guard hasSeenLive else {
+            // The first reading is the baseline; nothing in it is news.
+            hasSeenLive = true
+            for (id, session) in current where session.state == .working { workingSince[id] = now }
+            return
+        }
+        var updated = attention
+        for (id, session) in current {
+            let before = live[id]?.state
+            switch session.state {
+            case .working:
+                if workingSince[id] == nil { workingSince[id] = now }
+                updated.remove(id)
+            case .waiting:
+                workingSince[id] = nil
+                if before != .waiting {
+                    updated.insert(id)
+                    announce(id, session)
+                }
+            case .idle:
+                if before == .working, let since = workingSince[id], now.timeIntervalSince(since) >= finishThreshold {
+                    updated.insert(id)
+                    announce(id, session)
+                }
+                workingSince[id] = nil
+            }
+        }
+        for id in live.keys where current[id] == nil {
+            updated.remove(id)
+            workingSince[id] = nil
+        }
+        if updated != attention { attention = updated }
+    }
+
+    private func announce(_ id: String, _ session: LiveSession) {
+        guard notificationsEnabled else { return }
+        onAttention?(id, allSessions[id], session)
+    }
+
+    func session(withID id: String) -> SessionRecord? {
+        allSessions[id]
+    }
+
+    // MARK: - To-dos
+
+    func addTodo(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let bucket = todoBucket
+        write { db in
+            try db.run(
+                "INSERT INTO tasks(session_id, text, done, created, bucket) VALUES('', ?, 0, ?, ?)",
+                [trimmed, Date().timeIntervalSince1970, bucket]
+            )
+        }
+    }
+
+    func move(_ todo: TaskItem, to bucket: String) {
+        write { db in try db.run("UPDATE tasks SET bucket = ? WHERE id = ?", [bucket, todo.id]) }
+    }
+
+    func todos(in bucket: String) -> [TaskItem] {
+        todos.filter { ($0.bucket ?? TodoBucket.today) == bucket }
     }
 
     // MARK: - Activity

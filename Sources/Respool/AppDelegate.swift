@@ -1,10 +1,13 @@
 import AppKit
+import Combine
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var library: Library?
     private var controller: PanelController?
     private var statusItem: NSStatusItem?
     private var hotKey: HotKey?
+    private var notifier: Notifier?
+    private var observers = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if isAlreadyRunning() {
@@ -57,10 +60,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.library = library
         self.controller = controller
 
+        let notifier = Notifier { [weak library] sessionID in
+            guard let library, let session = library.session(withID: sessionID) else { return }
+            library.open(session)
+        }
+        library.onAttention = { [weak notifier] id, session, live in
+            // No banner while the app that hosts the session is in front; it shows the change itself.
+            // The session still counts toward the menu bar number.
+            let front = NSWorkspace.shared.frontmostApplication
+            if live.isInTerminal {
+                if LiveSessions.hostApp(of: live.pid)?.processIdentifier == front?.processIdentifier { return }
+            } else if front?.bundleIdentifier == "com.anthropic.claudefordesktop" {
+                return
+            }
+            let body: String
+            if live.state == .waiting {
+                body = live.waitingFor.map { "Sizi bekliyor: \($0)" } ?? "Sizi bekliyor"
+            } else {
+                body = "Bitti, sıra sizde"
+            }
+            notifier?.post(sessionID: id, title: session?.title ?? "Claude Code", body: body)
+        }
+        self.notifier = notifier
+
         installStatusItem()
         let hotKey = HotKey { [weak controller] in controller?.toggle() }
         library.hotKey = hotKey
         self.hotKey = hotKey
+
+        library.$attention
+            .receive(on: RunLoop.main)
+            .sink { [weak self] waiting in self?.showCount(waiting.count) }
+            .store(in: &observers)
+        library.startMonitoring()
 
         library.reload()
         controller.show()
@@ -85,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func installStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
             button.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Respool")
             button.target = self
@@ -94,6 +126,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.toolTip = "Respool"
         }
         statusItem = item
+    }
+
+    /// Shows how many sessions need attention next to the menu bar icon.
+    private func showCount(_ count: Int) {
+        guard let button = statusItem?.button else { return }
+        button.imagePosition = count > 0 ? .imageLeading : .imageOnly
+        button.title = count > 0 ? " \(count)" : ""
     }
 
     @objc private func statusItemClicked() {

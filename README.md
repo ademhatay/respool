@@ -18,6 +18,11 @@ Respool is an independent project and is not affiliated with Anthropic.
   folders shows up as one project. Projects can be merged and renamed by hand.
 - **Pins and tasks.** Pin the sessions you keep returning to and keep a short task list on each.
 - **Tags.** Give sessions colored tags and filter the list by tag.
+- **To-dos.** A short list for today and for this week, for the things that belong to no
+  session in particular.
+- **Notifications.** When a session finishes or starts waiting for you, Respool posts a
+  notification and shows a count next to its menu bar icon. Clicking the notification opens
+  the session.
 - **Live status.** Shows which sessions are running, and whether Claude is working or waiting
   for you.
 - **Details on hover.** Rest the pointer on a session or project for a card with a context

@@ -56,18 +56,23 @@ enum LiveSessions {
         return live
     }
 
-    /// Brings forward the app whose window hosts the process (Terminal, iTerm, an editor).
-    @discardableResult
-    static func activateHost(of pid: Int32) -> Bool {
+    /// The app whose window hosts the process (Terminal, iTerm, an editor).
+    static func hostApp(of pid: Int32) -> NSRunningApplication? {
         var current = pid
         for _ in 0..<12 {
-            guard let parent = parent(of: current), parent > 1 else { return false }
+            guard let parent = parent(of: current), parent > 1 else { return nil }
             if let app = NSRunningApplication(processIdentifier: parent), app.activationPolicy == .regular {
-                return app.activate()
+                return app
             }
             current = parent
         }
-        return false
+        return nil
+    }
+
+    /// Brings that app forward.
+    @discardableResult
+    static func activateHost(of pid: Int32) -> Bool {
+        hostApp(of: pid)?.activate() ?? false
     }
 
     private static func isRunning(_ pid: Int32) -> Bool {

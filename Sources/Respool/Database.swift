@@ -183,7 +183,8 @@ enum Schema {
         text TEXT NOT NULL,
         done INTEGER NOT NULL DEFAULT 0,
         created REAL NOT NULL,
-        done_at REAL
+        done_at REAL,
+        bucket TEXT
     );
     CREATE TABLE IF NOT EXISTS project_names(key TEXT PRIMARY KEY, name TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS project_merges(key TEXT PRIMARY KEY, target TEXT NOT NULL);
@@ -215,6 +216,11 @@ extension Schema {
             _ = try? db.exec("ALTER TABLE sessions ADD COLUMN \(column)")
         }
         try db.exec("DELETE FROM sessions; DELETE FROM messages; PRAGMA user_version = \(version);")
+    }
+
+    /// Adds columns that later versions introduced to tables holding the user's own data.
+    static func addColumns(_ db: Database) {
+        _ = try? db.exec("ALTER TABLE tasks ADD COLUMN bucket TEXT")
     }
 }
 
