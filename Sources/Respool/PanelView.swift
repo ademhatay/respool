@@ -28,6 +28,9 @@ struct PanelView: View {
             } else {
                 searchBar
                 filterBar
+                if !library.unbackedExpiringSessions.isEmpty {
+                    ExpiryBanner(library: library)
+                }
                 content
             }
             footer
@@ -469,6 +472,9 @@ struct SessionRow: View {
                         TagMark(color: style.selected ? Color.white : TagPalette.color(tag.color))
                             .help(tag.name)
                     }
+                    if let expiry = library.expiry(of: session) {
+                        ExpiryMark(expiry: expiry, selected: style.selected)
+                    }
                 }
                 if let snippet {
                     Text(highlighted(snippet, style: style))
@@ -551,6 +557,7 @@ struct SessionRow: View {
             Button("Yeni etiket…") { library.tagEditor = TagEditor(sessionID: session.id) }
         }
         Divider()
+        Button("Dökümü yedekle") { library.backUp([session]) }
         Button("Klasörü Finder'da göster") { Opener.revealFolder(session.cwd) }
         Button("Oturum kimliğini kopyala") { Opener.copy(session.id) }
     }
@@ -564,6 +571,58 @@ struct SessionRow: View {
             text[start..<end].foregroundColor = style.selected ? .white : .primary
         }
         return text
+    }
+}
+
+/// The mark on a session Claude Code may soon delete: a warning, or a calm sign once a copy of
+/// the transcript has been taken.
+struct ExpiryMark: View {
+    let expiry: (days: Int, backedUp: Bool)
+    let selected: Bool
+
+    var body: some View {
+        Image(systemName: expiry.backedUp ? "arrow.down.circle.fill" : "exclamationmark.triangle.fill")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(selected ? Color.white : (expiry.backedUp ? Color.secondary : Color.orange))
+            .help(text)
+    }
+
+    private var text: String {
+        if expiry.backedUp {
+            return expiry.days == 0 ? "Silinmeden yedeği alındı" : "Silinmeden yedeği alındı · \(expiry.days) gün kaldı"
+        }
+        if expiry.days == 0 { return "Claude Code bu sohbeti artık silebilir" }
+        return "Claude Code bu sohbeti \(expiry.days) gün içinde silebilir"
+    }
+}
+
+/// Says that Claude Code is about to delete some sessions, and offers to copy their transcripts.
+struct ExpiryBanner: View {
+    @ObservedObject var library: Library
+
+    var body: some View {
+        let sessions = library.unbackedExpiringSessions
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.orange)
+            Text("\(sessions.count) sohbet yakında silinebilir")
+                .font(.system(size: 12))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Yedekle") { library.backUp(sessions) }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.orange.opacity(0.12)))
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+        .help("""
+        Claude Code, \(Retention.days) gündür yazılmayan terminal sohbetlerinin dökümünü siler. \
+        Bir kopyası alınan sohbetler işaretlenir; kopyalar Respool'un klasöründeki Backups içinde durur.
+        """)
     }
 }
 
@@ -1847,6 +1906,14 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
+                        }
+                    }
+                    if library.backupCount > 0 {
+                        SettingsGroup {
+                            SettingsRow(title: "Yedekler · \(Format.count(library.backupCount)) dosya · \(Format.bytes(library.backupBytes))") {
+                                Button("Finder'da göster") { Opener.revealFolder(Retention.folder.path) }
+                                    .controlSize(.small)
+                            }
                         }
                     }
                     SettingsGroup {

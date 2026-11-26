@@ -36,6 +36,13 @@ Respool is an independent project and is not affiliated with Anthropic.
 - **Notifications.** When a session finishes or starts waiting for you, Respool posts a
   notification and shows a count next to its menu bar icon. Clicking the notification opens
   the session.
+- **Deletion warning.** Claude Code deletes the transcript of a terminal session it has not
+  written to for 30 days (`cleanupPeriodDays` in its settings); sessions the desktop app keeps
+  are exempt. In a session's last week Respool marks its row and shows a bar at the top of the
+  panel that copies all such transcripts into a `Backups` folder beside the index. Any session
+  can also be backed up from its context menu, and a session with a copy says so instead of
+  warning. The copies are the transcripts themselves; Respool keeps them and reads nothing
+  from them.
 - **Live status.** Shows which sessions are running, and whether Claude is working or waiting
   for you.
 - **Prompt outline.** Open any session's outline to read everything you asked in it, in order,
@@ -93,6 +100,8 @@ against Claude Code 2.1.332. The index, pins, tasks and tags live in
   opened there. Respool says so; switch organization in the Claude app first.
 - Token counts cover the main conversation, not subagents.
 - Lines longer than 512 KB in a transcript are skipped by the indexer.
+- The deletion warning reads `cleanupPeriodDays` from `~/.claude/settings.json`. A value set by
+  an organization's managed settings is not visible to Respool, which then assumes 30 days.
 
 ## Development
 

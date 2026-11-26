@@ -106,6 +106,9 @@ final class Library: ObservableObject {
     @Published private(set) var week: [DaySummary] = []
     /// Which days were opened or closed by hand. A day not named here is open when it is today.
     @Published var dayFold: [String: Bool] = [:]
+    /// The copies of transcripts in the backups folder.
+    @Published private(set) var backupCount = 0
+    @Published private(set) var backupBytes = 0
     @Published var notificationsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: "notificationsEnabled") }
     }
@@ -255,6 +258,7 @@ final class Library: ObservableObject {
         if hiddenProjects != snapshot.hidden { hiddenProjects = snapshot.hidden }
         sessionCount = snapshot.sessions.count
         hasLoaded = true
+        countBackups()
         if results != nil { scheduleSearch(immediately: true) }
     }
 
@@ -1216,6 +1220,56 @@ final class Library: ObservableObject {
                 buckets[min(Int((stamp - start) / day), count - 1)] += 1
             }
             return ActivitySeries(key: subject.key, buckets: buckets, startLabel: "\(count) gün önce", endLabel: "bugün")
+        }
+    }
+
+    // MARK: - Retention
+
+    /// Days until Claude Code may delete a session's transcript. Nil for sessions the desktop
+    /// app keeps, which it does not clean up, and for sessions with no recorded activity.
+    func daysLeft(for session: SessionRecord) -> Int? {
+        guard desktop.records[session.id] == nil, let last = session.lastActivity else { return nil }
+        return Int((Double(Retention.days) - Date().timeIntervalSince(last) / 86_400).rounded(.up))
+    }
+
+    /// What puts a session in danger of being deleted, for the mark on its row: how many days it
+    /// has left and whether a copy was taken. Nil when it is in no danger. A session that is
+    /// running is still being written to, so it is never one of these.
+    func expiry(of session: SessionRecord) -> (days: Int, backedUp: Bool)? {
+        guard live[session.id] == nil, let days = daysLeft(for: session),
+              (0...Retention.warningWindow).contains(days) else { return nil }
+        return (days, Retention.isBackedUp(session))
+    }
+
+    /// The sessions in their last days, the one with fewest left first.
+    var expiringSessions: [SessionRecord] {
+        allSessions.values
+            .filter { expiry(of: $0) != nil }
+            .sorted { lhs, rhs in
+                let left = daysLeft(for: lhs) ?? 0, right = daysLeft(for: rhs) ?? 0
+                return left == right ? lhs.id < rhs.id : left < right
+            }
+    }
+
+    var unbackedExpiringSessions: [SessionRecord] {
+        expiringSessions.filter { !Retention.isBackedUp($0) }
+    }
+
+    /// Copies the sessions' transcripts into the backups folder.
+    func backUp(_ sessions: [SessionRecord]) {
+        let done = sessions.filter(Retention.backUp).count
+        countBackups()
+        show(notice: done == 0 ? "Yedeklenemedi" : "\(done) sohbet yedeklendi")
+    }
+
+    /// Counts what is in the backups folder, for Settings.
+    func countBackups() {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: Retention.folder, includingPropertiesForKeys: [.fileSizeKey]
+        )) ?? []
+        backupCount = files.count
+        backupBytes = files.reduce(0) { total, file in
+            total + ((try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         }
     }
 

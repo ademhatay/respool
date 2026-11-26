@@ -434,6 +434,40 @@ if arguments.contains("--selftest") {
         library.dayFold = [:]
         library.selection = nil
 
+        // Copies of the transcripts Claude Code is about to delete.
+        try? FileManager.default.removeItem(at: Retention.folder)
+        library.countBackups()
+        func size(_ path: String) -> Int {
+            (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? -1
+        }
+        check("Claude Code's retention period is a sane number of days", Retention.days >= 1)
+        if let terminal = library.recent.first(where: { library.daysLeft(for: $0) != nil }), let last = terminal.lastActivity {
+            let age = Date().timeIntervalSince(last) / 86_400
+            check("days left run down from the retention period",
+                  library.daysLeft(for: terminal) == Int((Double(Retention.days) - age).rounded(.up)))
+        }
+        check("only sessions in their last days are about to be deleted",
+              library.expiringSessions.allSatisfy { session in
+                  library.daysLeft(for: session).map { (0...Retention.warningWindow).contains($0) } == true
+              })
+        if FileManager.default.fileExists(atPath: session.path) {
+            library.backUp([session])
+            check("a transcript is copied whole into the backups folder",
+                  Retention.isBackedUp(session) && size(Retention.backupURL(for: session).path) == size(session.path)
+                  && library.backupCount == 1 && library.notice == "1 sohbet yedeklendi")
+            library.backUp([session])
+            check("backing up again keeps a single copy", library.backupCount == 1)
+        }
+        for expiring in library.expiringSessions { library.backUp([expiring]) }
+        check("every session about to be deleted gets its copy",
+              library.expiringSessions.allSatisfy {
+                  !FileManager.default.fileExists(atPath: $0.path) || library.expiry(of: $0)?.backedUp == true
+              }
+              && library.unbackedExpiringSessions.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+        try? FileManager.default.removeItem(at: Retention.folder)
+        library.countBackups()
+        check("the backups folder can be emptied again", library.backupCount == 0 && library.backupBytes == 0)
+
         // Dragging to reorder. A day of its own keeps these tasks away from the ones above.
         let far = Format.dayKey(Date().addingTimeInterval(10 * 86_400))
         library.selectedDay = far
