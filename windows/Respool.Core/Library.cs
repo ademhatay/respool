@@ -204,7 +204,10 @@ public sealed class Library : IDisposable
     {
         change(Settings);
         Settings.Save();
+        // A change that does not alter the data still alters what is drawn (a folded section,
+        // the month calendar), so the views are told either way.
         if (reload) Reload();
+        else Changed?.Invoke();
     }
 
     // MARK: Writing the user's data

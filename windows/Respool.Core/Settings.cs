@@ -35,6 +35,8 @@ public sealed class Settings
     public string OpenMethod { get; set; } = "automatic";
     public bool OpensInTabs { get; set; } = true;
     public bool OpensOtherAccountsInTerminal { get; set; } = true;
+    /// <summary>With an editor chosen, the chat starts in the editor's own terminal rather than one beside it.</summary>
+    public bool UsesEditorTerminal { get; set; }
     public bool StaysOpen { get; set; }
     public bool ShowsOrganizations { get; set; }
     public string? OrganizationFilter { get; set; }

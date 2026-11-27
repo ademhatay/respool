@@ -16,6 +16,15 @@ public static class Opener
     /// <summary>A new tab in the open Windows Terminal window rather than a new window.</summary>
     public static bool UsesTabs { get; set; } = true;
 
+    /// <summary>With an editor chosen, the chat runs in the editor's own terminal.</summary>
+    public static bool UsesEditorTerminal { get; set; }
+
+    /// <summary>
+    /// Types a command into an editor's own terminal, in the background; runs the fallback when
+    /// it could not. Set by the app, which can press keys; null where nothing can.
+    /// </summary>
+    public static Action<OpenMethod, string, Action>? EditorTerminal { get; set; }
+
     private static string Local => Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
     public static bool HasWindowsTerminal => File.Exists(Path.Combine(Local, "Microsoft", "WindowsApps", "wt.exe"));
@@ -160,8 +169,13 @@ public static class Opener
             case OpenMethod.Terminal:
                 return Run(Resume(session)) ? OpenOutcome.Opened : OpenOutcome.Failed;
             default:
-                // The editor opens the folder; the chat goes on in a terminal beside it.
+                // The editor opens the folder; the chat goes on in its own terminal, or in one beside it.
                 if (!OpenFolder(method, WorkingDirectory(session.Cwd))) return OpenOutcome.Failed;
+                if (UsesEditorTerminal && EditorTerminal is { } type)
+                {
+                    type(method, $"claude --resume {session.Id}", () => Run(Resume(session)));
+                    return OpenOutcome.OpenedInEditor;
+                }
                 return Run(Resume(session)) ? OpenOutcome.OpenedInEditor : OpenOutcome.Failed;
         }
     }
@@ -198,6 +212,12 @@ public static class Opener
     public static bool StartSession(string folder, string? prompt, OpenMethod method)
     {
         if (method.IsEditor() && !OpenFolder(method, folder)) return false;
+        if (method.IsEditor() && UsesEditorTerminal && EditorTerminal is { } type)
+        {
+            var command = string.IsNullOrWhiteSpace(prompt) ? "claude" : "claude " + QuotePrompt(prompt).Replace("%%", "%");
+            type(method, command, () => Run(NewSession(folder, prompt)));
+            return true;
+        }
         return Run(NewSession(folder, prompt));
     }
 

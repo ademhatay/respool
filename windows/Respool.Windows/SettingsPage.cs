@@ -109,6 +109,13 @@ public sealed class SettingsPage
         Add(Group(
             Row(L.OpenChatsIn, popup),
             Row(L.StaysOpen, Ui.Switch(Settings.StaysOpen, on => Change(settings => settings.StaysOpen = on, reload: false))),
+            Opener.FirstEditor is not null
+                ? Row(L.UsesEditorTerminal, Ui.Switch(Settings.UsesEditorTerminal, on =>
+                {
+                    Opener.UsesEditorTerminal = on;
+                    Change(settings => settings.UsesEditorTerminal = on, reload: false);
+                })).Tip(L.UsesEditorTerminalHelp)
+                : null,
             Row(L.OpensOtherAccounts, Ui.Switch(Settings.OpensOtherAccountsInTerminal, on => Change(settings => settings.OpensOtherAccountsInTerminal = on, reload: false))),
             Opener.HasWindowsTerminal
                 ? Row(L.OpensInTabs, Ui.Switch(Settings.OpensInTabs, on =>

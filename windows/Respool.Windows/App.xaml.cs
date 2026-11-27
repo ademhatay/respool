@@ -62,6 +62,8 @@ public partial class App : Application, IAppHost
         var settings = Settings.Load();
         L.Choice = settings.Language;
         Opener.UsesTabs = settings.OpensInTabs;
+        Opener.UsesEditorTerminal = settings.UsesEditorTerminal;
+        Opener.EditorTerminal = (editor, command, fallback) => EditorTerminal.Run(editor, command, fallback, Dispatcher);
         Theme = Theme.For(settings.Appearance);
         Ui.T = Theme;
         PaintResources();
