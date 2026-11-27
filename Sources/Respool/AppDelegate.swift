@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notifier: Notifier?
     private var observers = Set<AnyCancellable>()
     private var clock: Timer?
+    private var onboarding: OnboardingController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if isAlreadyRunning() {
@@ -126,6 +127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateStatusTitle() }
             .store(in: &observers)
+        library.$opensInTabs
+            .sink { Opener.usesTabs = $0 }
+            .store(in: &observers)
         library.$runningTimer
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateStatusTitle() }
@@ -139,8 +143,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak library] _ in library?.stopTimer() }
         library.startMonitoring()
 
-        library.reload()
-        controller.show()
+        let onboarding = OnboardingController(library: library)
+        onboarding.onFinish = { [weak controller] in controller?.show() }
+        library.onShowWelcome = { [weak controller, weak onboarding] in
+            controller?.hide()
+            onboarding?.show()
+        }
+        self.onboarding = onboarding
+
+        // Loaded before the first screen, so the welcome can say what was found.
+        library.reloadSync()
+        if OnboardingController.isDue {
+            onboarding.show()
+        } else {
+            controller.show()
+        }
     }
 
     private static func otherOrganizationNotice(for session: SessionRecord) -> String {
@@ -152,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Opening the app again (from Finder or Spotlight) brings the panel up.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        controller?.show()
+        if onboarding?.isShown != true { controller?.show() }
         return false
     }
 

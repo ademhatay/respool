@@ -77,10 +77,54 @@ enum Opener {
         open(folder, with: editor)
     }
 
+    /// Set from Settings: resume in a new tab of iTerm's front window rather than a new window.
+    static var usesTabs = true
+
     /// Runs a script in the terminal a method names, or in the one that opens scripts by default.
     private static func run(_ script: URL, with method: OpenMethod?) -> Bool {
+        if method == .iterm, usesTabs, application(for: .iterm) != nil {
+            runInTab(script)
+            return true
+        }
         if let method, method.bundleID != nil { return open(script, with: method) }
         return NSWorkspace.shared.open(script)
+    }
+
+    static let tabScript = """
+    on run argv
+        set scriptPath to item 1 of argv
+        tell application "iTerm"
+            activate
+            if (count of windows) is 0 then
+                create window with default profile command scriptPath
+            else
+                tell current window to create tab with default profile command scriptPath
+            end if
+        end tell
+    end run
+    """
+
+    /// Asks iTerm for a new tab that runs the script. Terminal has no such command, so this is
+    /// iTerm's alone. If iTerm will not be scripted (the user said no when macOS asked), the
+    /// script opens in a new window instead.
+    private static func runInTab(_ script: URL) {
+        // iTerm splits its command at spaces, so the script is run from a path that has none.
+        let copy = FileManager.default.temporaryDirectory.appendingPathComponent("respool-" + script.lastPathComponent)
+        try? FileManager.default.removeItem(at: copy)
+        guard (try? FileManager.default.copyItem(at: script, to: copy)) != nil, !copy.path.contains(" ") else {
+            _ = open(script, with: .iterm)
+            return
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", tabScript, copy.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { finished in
+            guard finished.terminationStatus != 0 else { return }
+            DispatchQueue.main.async { _ = open(script, with: .iterm) }
+        }
+        if (try? process.run()) == nil { _ = open(script, with: .iterm) }
     }
 
     /// Opens the session in the Claude desktop app.

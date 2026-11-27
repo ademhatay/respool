@@ -14,6 +14,8 @@ struct LiveSession: Hashable {
     let waitingFor: String?
     /// Set when the session runs inside the Claude desktop app.
     let desktopID: String?
+    /// The bundle identifier of the app whose window the session runs in, when it could be told.
+    var hostBundleID: String?
 
     var isInTerminal: Bool { desktopID == nil }
 
@@ -50,7 +52,8 @@ enum LiveSessions {
                 pid: Int32(pid),
                 state: state,
                 waitingFor: object["waitingFor"] as? String,
-                desktopID: object["hostSessionId"] as? String
+                desktopID: object["hostSessionId"] as? String,
+                hostBundleID: hostApp(of: Int32(pid))?.bundleIdentifier
             )
         }
         return live

@@ -462,6 +462,17 @@ enum L10n {
     static var openOnGitHub: String { tr("GitHub'da aç", "Open on GitHub") }
     static var noReleases: String { tr("Henüz yayımlanmış sürüm yok", "No releases published yet") }
     static func updateMenu(_ version: String) -> String { tr("Yeni sürüm: \(version)…", "New version: \(version)…") }
+    static var waitingTitle: String { tr("Sizi bekleyenler", "Waiting for you") }
+    static var opensInTabs: String { tr("iTerm'de yeni sekmede aç", "Open in a new iTerm tab") }
+    static var welcomeTitle: String { tr("Respool'a hoş geldiniz", "Welcome to Respool") }
+    static var welcomeLine: String {
+        tr("Claude Code sohbetleriniz tek panelde. Birkaç tercih, sonra hazır.", "Your Claude Code chats in one panel. A few choices and you are set.")
+    }
+    static var welcomeStart: String { tr("Başla", "Get started") }
+    static var welcomeRow: String { tr("Karşılama", "Welcome screen") }
+    static func welcomeFound(_ chats: Int, _ projects: Int) -> String {
+        tr("\(Format.count(chats)) sohbet · \(Format.count(projects)) proje bulundu", "Found \(Format.count(chats)) chats in \(Format.count(projects)) projects")
+    }
     static var themeTitle: String { tr("Tema", "Theme") }
     static var themeLight: String { tr("Açık", "Light") }
     static var themeDark: String { tr("Koyu", "Dark") }

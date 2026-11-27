@@ -191,6 +191,22 @@ struct PanelView: View {
     }
 
     @ViewBuilder private var browseRows: some View {
+        let needsYou = library.needsYou
+        if !needsYou.isEmpty {
+            CollapsibleHeader(
+                library: library, title: L10n.waitingTitle,
+                section: PanelSection.waiting, count: needsYou.count
+            )
+            if !library.isCollapsed(PanelSection.waiting) {
+                ForEach(needsYou) { session in
+                    SessionRow(
+                        library: library, session: session,
+                        rowKey: RowKey.waiting(session.id), detail: waitingDetail(session)
+                    )
+                }
+            }
+        }
+
         if library.showsTodos {
             TodoSection(library: library, focus: $focus)
         }
@@ -246,6 +262,13 @@ struct PanelView: View {
                     .padding(.vertical, 6)
             }
         }
+    }
+
+    /// What a session wants, then where it is.
+    private func waitingDetail(_ session: SessionRecord) -> String {
+        let live = library.live[session.id]
+        let state = live?.state == .waiting ? (live?.waitingFor.map(L10n.waitingFor) ?? L10n.waiting) : L10n.finished
+        return state + " · " + session.placeLabel
     }
 
     @ViewBuilder private func resultRows(_ results: [SearchHit]) -> some View {
@@ -2477,15 +2500,31 @@ struct SettingsView: View {
                             .fixedSize()
                         }
                     }
+                    if library.openMethods.contains(.iterm) {
+                        SettingsGroup {
+                            SettingsRow(title: L10n.opensInTabs) {
+                                Toggle("", isOn: $library.opensInTabs)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
                     SettingsGroup {
-                        SettingsRow(title: L10n.launchAtLogin) {
-                            Toggle("", isOn: Binding(
-                                get: { library.launchesAtLogin },
-                                set: { library.setLaunchesAtLogin($0) }
-                            ))
-                            .labelsHidden()
-                            .toggleStyle(.switch)
-                            .controlSize(.small)
+                        VStack(spacing: 0) {
+                            SettingsRow(title: L10n.launchAtLogin) {
+                                Toggle("", isOn: Binding(
+                                    get: { library.launchesAtLogin },
+                                    set: { library.setLaunchesAtLogin($0) }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                            }
+                            SettingsRow(title: L10n.welcomeRow) {
+                                Button(L10n.view) { library.onShowWelcome?() }
+                                    .controlSize(.small)
+                            }
                         }
                     }
                     SettingsGroup {
@@ -2678,6 +2717,16 @@ struct SettingsView: View {
     }
 
     private func shortcutButton(_ kind: ShortcutKind) -> some View {
+        ShortcutButton(library: library, kind: kind)
+    }
+}
+
+/// Shows a shortcut and, when clicked, listens for the keys that will replace it.
+struct ShortcutButton: View {
+    @ObservedObject var library: Library
+    let kind: ShortcutKind
+
+    var body: some View {
         let recording = library.recordingKind == kind
         return Button {
             if recording {

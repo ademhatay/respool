@@ -197,6 +197,14 @@ final class Library: ObservableObject {
     @Published var openMethod: OpenMethod {
         didSet { UserDefaults.standard.set(openMethod.rawValue, forKey: "openMethod") }
     }
+    /// Where each session was last seen running, which is where the automatic way reopens it.
+    @Published private(set) var sessionHosts: [String: OpenMethod] = [:]
+    /// The same for projects: where their most recently seen session ran.
+    @Published private(set) var projectHosts: [String: OpenMethod] = [:]
+    /// Resumes in a new tab of iTerm's front window instead of a new window.
+    @Published var opensInTabs: Bool {
+        didSet { UserDefaults.standard.set(opensInTabs, forKey: "opensInTabs") }
+    }
     /// The projects that open their sessions their own way.
     @Published private(set) var projectOpenMethods: [String: OpenMethod] = [:]
     /// The ways of opening a session that this Mac has the app for.
@@ -225,6 +233,8 @@ final class Library: ObservableObject {
     var searchFocused = true
     var onOpen: ((SessionRecord, OpenMethod) -> Void)?
     var onOpenInDesktop: ((SessionRecord) -> Void)?
+    /// Called to show the welcome screen again.
+    var onShowWelcome: (() -> Void)?
     /// Called with a folder and a first prompt to start a new session.
     var onStartSession: ((String, String, OpenMethod) -> Void)?
     /// Called when a session starts waiting or finishes its work.
@@ -266,6 +276,7 @@ final class Library: ObservableObject {
         let gap = UserDefaults.standard.integer(forKey: "idleGapMinutes")
         idleGapMinutes = Self.idleGapChoices.contains(gap) ? gap : 15
         openMethod = UserDefaults.standard.string(forKey: "openMethod").flatMap(OpenMethod.init) ?? .automatic
+        opensInTabs = UserDefaults.standard.object(forKey: "opensInTabs") as? Bool ?? true
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
         panelEdge = UserDefaults.standard.string(forKey: "panelEdge").flatMap(PanelEdge.init) ?? .right
         showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true
@@ -300,6 +311,8 @@ final class Library: ObservableObject {
         var runningTimer: RunningTimer?
         var lastTimeEntries: [String: TimeEntry] = [:]
         var openMethods: [String: OpenMethod] = [:]
+        var sessionHosts: [String: OpenMethod] = [:]
+        var projectHosts: [String: OpenMethod] = [:]
     }
 
     /// How the project list is thinned and ordered, and how time is counted. Read on the main
@@ -356,6 +369,8 @@ final class Library: ObservableObject {
         runningTimer = snapshot.runningTimer
         lastTimeEntries = snapshot.lastTimeEntries
         projectOpenMethods = snapshot.openMethods
+        sessionHosts = snapshot.sessionHosts
+        projectHosts = snapshot.projectHosts
         organizations = snapshot.organizations
         tagged = snapshot.tagged
         if let tagFilter, !snapshot.tags.contains(where: { $0.id == tagFilter }) { self.tagFilter = nil }
@@ -466,7 +481,7 @@ final class Library: ObservableObject {
         try? readDB.query(
             """
             SELECT id, path, cwd, custom_title, ai_title, first_prompt, last_prompt, last_ts, pr_number, pr_url, msg_count,
-                   first_ts, branch, file_size, tok_input, tok_cached, tok_output, context_tokens, model
+                   first_ts, branch, file_size, tok_input, tok_cached, tok_output, context_tokens, model, entrypoint
             FROM sessions
             WHERE msg_count > 0 OR (custom_title IS NOT NULL AND custom_title != '')
             ORDER BY last_ts DESC
@@ -490,6 +505,7 @@ final class Library: ObservableObject {
             record.outputTokens = row.int(16)
             record.contextTokens = row.optionalInt(17)
             record.model = row.text(18)
+            record.entrypoint = row.text(19)
             let identity = identities[cwd] ?? {
                 let fallback = ProjectResolver.fallback(cwd.isEmpty ? L10n.otherProject : cwd, durable: false)
                 return (fallback.key, fallback.name)
@@ -615,6 +631,12 @@ final class Library: ObservableObject {
             if let key = row.text(0), let method = row.text(1).flatMap(OpenMethod.init) {
                 snapshot.openMethods[finalKey(key)] = method
             }
+        }
+        // Oldest first, so that a project ends up with the host of its most recently seen session.
+        try? readDB.query("SELECT session_id, method FROM session_hosts ORDER BY seen") { row in
+            guard let id = row.text(0), let method = row.text(1).flatMap(OpenMethod.init) else { return }
+            snapshot.sessionHosts[id] = method
+            if let key = snapshot.sessions[id]?.projectKey { snapshot.projectHosts[key] = method }
         }
         let names = Dictionary(uniqueKeysWithValues: snapshot.allProjects.map { ($0.key, $0.name) })
         addTime(to: &snapshot, arrangement: arrangement, resolve: finalKey) { key in
@@ -859,6 +881,7 @@ final class Library: ObservableObject {
         if let results { return results.map { RowKey.hit($0.id) } }
         if let tagged { return tagged.map { RowKey.tagged($0.id) } }
         var keys: [String] = []
+        if !isCollapsed(PanelSection.waiting) { keys += needsYou.map { RowKey.waiting($0.id) } }
         if !isCollapsed(PanelSection.pinned) { keys += pinned.map { RowKey.pin($0.id) } }
         if !isCollapsed(PanelSection.recent) { keys += recent.map { RowKey.recent($0.id) } }
         if showsWeek, !isCollapsed(PanelSection.week) {
@@ -894,13 +917,39 @@ final class Library: ObservableObject {
     func open(_ session: SessionRecord, with method: OpenMethod? = nil) {
         hover = nil
         attention.remove(session.id)
-        onOpen?(session, method ?? openMethod(forProject: session.projectKey))
+        onOpen?(session, method ?? openMethod(for: session))
     }
 
     /// The way a project's sessions open: its own choice, or the one from Settings.
     func openMethod(forProject key: String) -> OpenMethod {
         let method = projectOpenMethods[key] ?? openMethod
         return openMethods.contains(method) ? method : .automatic
+    }
+
+    /// The way one session opens. Left to itself, a session goes back to where it was last seen
+    /// running; one never seen goes where its kind lives, then where its project's sessions run.
+    func openMethod(for session: SessionRecord) -> OpenMethod {
+        let chosen = openMethod(forProject: session.projectKey)
+        guard chosen == .automatic else { return chosen }
+        if let host = sessionHosts[session.id], openMethods.contains(host) { return host }
+        if desktop.records[session.id] != nil { return .automatic }
+        if session.entrypoint == "claude-vscode", openMethods.contains(.vscode) { return .vscode }
+        if let host = projectHosts[session.projectKey], host != .desktop, openMethods.contains(host) { return host }
+        return .automatic
+    }
+
+    /// The way a new session starts in a project: where the project's sessions have been running.
+    func startMethod(forProject key: String) -> OpenMethod {
+        let chosen = openMethod(forProject: key)
+        guard chosen == .automatic else { return chosen }
+        if let host = projectHosts[key], host != .desktop, openMethods.contains(host) { return host }
+        return .automatic
+    }
+
+    /// Records where a session ran, as a reading of the running sessions would.
+    func remember(host: OpenMethod, for session: SessionRecord) {
+        sessionHosts[session.id] = host
+        projectHosts[session.projectKey] = host
     }
 
     /// Gives a project its own way of opening, or takes it back with nil.
@@ -1194,6 +1243,7 @@ final class Library: ObservableObject {
     /// a session that started waiting, or one that worked for a while and then stopped.
     func ingestLive(_ current: [String: LiveSession], now: Date = Date()) {
         defer { if live != current { live = current } }
+        rememberHosts(of: current, now: now)
         guard hasSeenLive else {
             // The first reading is the baseline; nothing in it is news.
             hasSeenLive = true
@@ -1226,6 +1276,36 @@ final class Library: ObservableObject {
             workingSince[id] = nil
         }
         if updated != attention { attention = updated }
+    }
+
+    /// Notes which app each running session is in, so it can be reopened there later.
+    private func rememberHosts(of current: [String: LiveSession], now: Date) {
+        var news: [(String, OpenMethod)] = []
+        for (id, session) in current {
+            let host = session.desktopID != nil ? OpenMethod.desktop : OpenMethod(hostBundleID: session.hostBundleID)
+            if let host, sessionHosts[id] != host { news.append((id, host)) }
+        }
+        guard !news.isEmpty else { return }
+        for (id, host) in news {
+            sessionHosts[id] = host
+            if let key = allSessions[id]?.projectKey { projectHosts[key] = host }
+        }
+        let stamp = now.timeIntervalSince1970
+        userQueue.async { [weak self] in
+            for (id, host) in news {
+                _ = try? self?.userDB.run(
+                    "INSERT OR REPLACE INTO session_hosts(session_id, method, seen) VALUES(?, ?, ?)", [id, host.rawValue, stamp]
+                )
+            }
+        }
+    }
+
+    /// The sessions that want the user now: waiting for an answer, or finished since last looked at.
+    var needsYou: [SessionRecord] {
+        let ids = Set(live.filter { $0.value.state == .waiting }.keys).union(attention)
+        return ids.compactMap { allSessions[$0] }
+            .filter { !hiddenProjects.contains($0.projectKey) }
+            .sorted { ($0.lastActivity ?? .distantPast, $0.id) > ($1.lastActivity ?? .distantPast, $1.id) }
     }
 
     private func announce(_ id: String, _ session: LiveSession) {
@@ -1365,7 +1445,7 @@ final class Library: ObservableObject {
     }
 
     private func startSession(in folder: String, prompt: String, projectKey: String) {
-        onStartSession?(folder, prompt, openMethod(forProject: projectKey))
+        onStartSession?(folder, prompt, startMethod(forProject: projectKey))
     }
 
     /// A folder of the project that is still on this Mac.

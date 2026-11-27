@@ -164,6 +164,22 @@ if let output = value(after: "--snapshot") {
             RunLoop.main.run(until: Date().addingTimeInterval(0.4))
             library.reloadSync()
         }
+        if arguments.contains("--waiting"), library.recent.count >= 2 {
+            // Two made-up running sessions: one asking for permission, one that has just finished.
+            let asking = library.recent[0].id, done = library.recent[1].id
+            library.finishThreshold = 0
+            library.ingestLive([:])
+            library.ingestLive([done: LiveSession(pid: 1, state: .working, waitingFor: nil, desktopID: nil)])
+            library.ingestLive([
+                asking: LiveSession(pid: 2, state: .waiting, waitingFor: "permission", desktopID: nil),
+                done: LiveSession(pid: 1, state: .idle, waitingFor: nil, desktopID: nil),
+            ])
+        }
+        if arguments.contains("--onboarding") {
+            let ok = Snapshot.renderWelcome(library: library, to: output, dark: arguments.contains("--dark"))
+            print(ok ? "wrote \(output)" : "snapshot failed")
+            exit(ok ? 0 : 1)
+        }
         if arguments.contains("--focus-time") {
             // Folds what sits above the time section, so that it is what the drawing shows.
             for section in [PanelSection.todos, PanelSection.notes, PanelSection.pinned, PanelSection.recent]
@@ -529,7 +545,22 @@ if arguments.contains("--selftest") {
             library.onOpen = { _, method in asked = method }
             library.openMethod = .automatic
             library.open(member)
-            check("a session opens the general way by default", asked == .automatic)
+            check("a session left to itself opens the automatic way", asked == library.openMethod(for: member))
+            if let fresh = library.allProjects.flatMap(\.sessions).first(where: {
+                library.desktopID(for: $0.id) == nil && $0.entrypoint != "claude-vscode" && $0.id != member.id
+            }) {
+                check("a session never seen running opens where its kind lives", library.openMethod(for: fresh) == .automatic)
+                library.remember(host: .terminal, for: fresh)
+                check("a session goes back to the app it was last seen in", library.openMethod(for: fresh) == .terminal)
+                check("a new session starts where its project's sessions run", library.startMethod(forProject: fresh.projectKey) == .terminal)
+                library.openMethod = .desktop
+                check("a choice made in Settings wins over what was seen", library.openMethod(for: fresh) == .desktop)
+                library.openMethod = .automatic
+                library.reloadSync()
+            }
+            check("apps are recognised by their identifier",
+                  OpenMethod(hostBundleID: "com.googlecode.iterm2") == .iterm && OpenMethod(hostBundleID: "dev.zed.Zed") == .zed
+                  && OpenMethod(hostBundleID: "com.anthropic.claudefordesktop") == .desktop && OpenMethod(hostBundleID: "com.example.other") == nil)
             library.setOpenMethod(.terminal, for: project); settle()
             check("a project can have its own way of opening", library.openMethod(forProject: project.key) == .terminal)
             library.open(member)
@@ -542,6 +573,20 @@ if arguments.contains("--selftest") {
         }
         check("only installed apps are offered for opening",
               library.openMethods.contains(.automatic) && library.openMethods.contains(.terminal))
+
+        // Sessions that want the user.
+        if let probe = library.recent.first {
+            library.finishThreshold = 0
+            library.ingestLive([:])
+            library.ingestLive([probe.id: LiveSession(pid: 1, state: .waiting, waitingFor: "permission", desktopID: nil, hostBundleID: "com.googlecode.iterm2")])
+            check("a waiting session is listed as needing you", library.needsYou.map(\.id) == [probe.id])
+            check("where it runs is remembered", library.sessionHosts[probe.id] == .iterm)
+            library.ingestLive([probe.id: LiveSession(pid: 1, state: .working, waitingFor: nil, desktopID: nil)])
+            check("it leaves the list once it is working again", library.needsYou.isEmpty)
+            library.ingestLive([:])
+            settle()
+            try index.exec("DELETE FROM session_hosts"); library.reloadSync()
+        }
 
         // Updates and their notes.
         check("versions compare number by number",

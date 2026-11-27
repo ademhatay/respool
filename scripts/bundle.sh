@@ -10,5 +10,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Respool "$APP/Contents/MacOS/Respool"
 cp Support/Info.plist "$APP/Contents/Info.plist"
 cp Support/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-codesign --force --sign - "$APP" >/dev/null 2>&1
+# Signed for this Mac only, unless RESPOOL_SIGN_IDENTITY names a Developer ID certificate.
+IDENTITY="${RESPOOL_SIGN_IDENTITY:--}"
+if [ "$IDENTITY" = "-" ]; then
+    codesign --force --sign - "$APP" >/dev/null 2>&1
+else
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+fi
 echo "$PWD/$APP"

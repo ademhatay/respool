@@ -20,6 +20,8 @@ struct SessionRecord: Identifiable, Hashable {
     var outputTokens = 0
     var contextTokens: Int?
     var model: String?
+    /// How the session was started, as Claude Code names it: "cli", "claude-desktop", "claude-vscode".
+    var entrypoint: String?
     var projectKey: String = ""
     var projectName: String = ""
     var tagIDs: [Int64] = []
@@ -276,6 +278,7 @@ enum PanelEdge: String, CaseIterable {
 }
 
 enum PanelSection {
+    static let waiting = "waiting"
     static let todos = "todos"
     static let notes = "notes"
     static let pinned = "pinned"
@@ -496,6 +499,7 @@ enum RowKey {
     static func day(_ day: String, _ id: String) -> String { "day:" + day + ":" + id }
     static func hit(_ id: String) -> String { "hit:" + id }
     static func tagged(_ id: String) -> String { "tagged:" + id }
+    static func waiting(_ id: String) -> String { "waiting:" + id }
 
     static func sessionID(_ key: String) -> String {
         // A day's rows name the day as well: day:<day>:<session id>.
@@ -686,6 +690,18 @@ enum OpenMethod: String, CaseIterable, Hashable {
         case .vscode: return "com.microsoft.VSCode"
         case .cursor: return "com.todesktop.230313mzl4w4u92"
         case .zed: return "dev.zed.Zed"
+        }
+    }
+
+    /// The way of opening that goes with the app a session was seen running in.
+    init?(hostBundleID: String?) {
+        guard let hostBundleID else { return nil }
+        if hostBundleID == "com.anthropic.claudefordesktop" {
+            self = .desktop
+        } else if let match = Self.allCases.first(where: { $0.bundleID == hostBundleID }) {
+            self = match
+        } else {
+            return nil
         }
     }
 

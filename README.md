@@ -71,8 +71,15 @@ The screenshots show made-up data.
   without opening the session itself.
 - **Details on hover.** Rest the pointer on a session or project for a card with a context
   gauge, token usage, an activity chart, transcript size, model, branch and folder.
+- **Waiting for you.** Sessions that are waiting for an answer, or that finished while you were
+  elsewhere, are listed at the top of the panel.
 - **Opening.** By default a session opens where it lives: in the Claude desktop app, by
-  bringing its terminal forward, or by resuming it in a new terminal. Settings can send
+  bringing its terminal forward, or by resuming it in a new terminal. Respool notes which app
+  each running session is in (Terminal, iTerm, an editor, the Claude app) and later reopens
+  the session there, and starts a project's new sessions where its sessions have been
+  running. In iTerm a session resumes in a new tab of the front window; macOS asks once for
+  permission to control iTerm, and Settings can go back to a new window. Terminal has no
+  command for opening a tab, so there it is always a window. Settings can send
   sessions somewhere else instead (the Claude app, Terminal, iTerm, VS Code, Cursor or Zed,
   whichever are installed), each project can have its own choice from its context menu, and a
   session's context menu opens it any of these ways once. An editor is opened on the
@@ -101,6 +108,10 @@ The panel opens from the right edge by default; Settings can move it to the left
 bottom. Or drag it by the margin around the search field or by the footer, and resize it from
 its edges: it then stays where you put it, at the size you gave it, until you pick an edge
 again. Settings also has the theme (system, light or dark) and the language.
+
+The first time it starts, Respool shows a welcome screen in the middle of the display with the
+shortcut, the panel's position, where chats open and whether to start at login. Settings can
+show it again.
 
 ## Install
 
@@ -151,6 +162,10 @@ RESPOOL_DB=/tmp/test.db .build/release/Respool --selftest  # pins, tasks, tags, 
 RESPOOL_DB=/tmp/demo.db .build/release/Respool --snapshot docs/panel.png --demo --lang en --dark  # screenshot with made-up data
 swift scripts/make-icon.swift                              # regenerate the app icon
 ```
+
+`scripts/release.sh` builds a copy for other Macs: signed with a Developer ID certificate,
+notarized, and zipped. It needs `RESPOOL_SIGN_IDENTITY` and `RESPOOL_NOTARY_PROFILE`; the
+script's header says what they are.
 
 ## License
 
