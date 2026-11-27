@@ -17,6 +17,21 @@ enum Snapshot {
         return draw(root, size: size, to: path, dark: dark)
     }
 
+    /// Draws the quick switcher with something typed into it.
+    static func renderSwitcher(library: Library, query: String, to path: String, dark: Bool) -> Bool {
+        let model = SwitcherModel()
+        model.query = query
+        model.items = library.switcherItems(for: query)
+        let content = SwitcherView(library: library, model: model, choose: { _, _ in })
+        let size = NSSize(width: SwitcherView.width, height: SwitcherView.height)
+        let root = content
+            .background(Color(nsColor: dark ? NSColor(white: 0.16, alpha: 1) : NSColor(white: 0.96, alpha: 1)))
+            .clipShape(RoundedRectangle(cornerRadius: SwitcherView.radius, style: .continuous))
+            .padding(20)
+            .background(Color(nsColor: dark ? NSColor(white: 0.08, alpha: 1) : NSColor(white: 0.80, alpha: 1)))
+        return draw(root, size: size, to: path, dark: dark)
+    }
+
     static func render(library: Library, to path: String, dark: Bool, height: CGFloat) -> Bool {
         let size = NSSize(width: Metrics.panelWidth, height: height)
 

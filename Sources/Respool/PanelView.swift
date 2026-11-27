@@ -4,6 +4,7 @@ enum PanelField: Hashable {
     case search
     case task(String)
     case rename(String)
+    case renameSession(String)
     case tagName
     case organization(String)
     case todo
@@ -29,8 +30,13 @@ struct PanelView: View {
                 SettingsView(library: library, focus: $focus)
             } else if let outline = library.outline {
                 OutlineView(library: library, outline: outline)
+            } else if let project = library.pageProject {
+                ProjectPage(library: library, project: project)
             } else {
                 searchBar
+                if library.query.isEmpty {
+                    TabBar(library: library)
+                }
                 filterBar
                 if !library.unbackedExpiringSessions.isEmpty {
                     ExpiryBanner(library: library)
@@ -116,7 +122,9 @@ struct PanelView: View {
 
     @ViewBuilder private var filterBar: some View {
         let showsOrganizations = library.showsOrganizations && library.organizations.count > 1
-        let showsTags = library.tagEditor != nil || !library.tags.isEmpty
+        // Tags sort chats, so they are offered where the chats are.
+        let showsTags = library.tagEditor != nil
+            || (!library.tags.isEmpty && (library.tab == .chats || !library.query.isEmpty || library.tagFilter != nil))
         if showsOrganizations || showsTags {
             VStack(alignment: .leading, spacing: 8) {
                 if showsOrganizations {
@@ -172,8 +180,8 @@ struct PanelView: View {
                             browseRows
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 12)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 16)
                 }
                 .onChange(of: library.selection) { _, key in
                     guard let key else { return }
@@ -192,77 +200,87 @@ struct PanelView: View {
     }
 
     @ViewBuilder private var browseRows: some View {
-        let needsYou = library.needsYou
-        if !needsYou.isEmpty {
-            CollapsibleHeader(
-                library: library, title: L10n.waitingTitle,
-                section: PanelSection.waiting, count: needsYou.count
-            )
-            if !library.isCollapsed(PanelSection.waiting) {
-                ForEach(needsYou) { session in
-                    SessionRow(
-                        library: library, session: session,
-                        rowKey: RowKey.waiting(session.id), detail: waitingDetail(session)
-                    )
+        if library.tab == .today, library.showsDayEndCard {
+            DayEndCard(library: library)
+        }
+        ForEach(library.sectionOrder.filter { PanelTab.of($0) == library.tab }, id: \.self) { section in
+            if library.isShown(section) { browseSection(section) }
+        }
+    }
+
+    @ViewBuilder private func browseSection(_ section: String) -> some View {
+        switch section {
+        case PanelSection.waiting:
+            let needsYou = library.needsYou
+            if !needsYou.isEmpty {
+                CollapsibleHeader(
+                    library: library, title: L10n.waitingTitle,
+                    section: PanelSection.waiting, count: needsYou.count
+                )
+                if !library.isCollapsed(PanelSection.waiting) {
+                    ForEach(needsYou) { session in
+                        SessionRow(
+                            library: library, session: session,
+                            rowKey: RowKey.waiting(session.id), detail: waitingDetail(session)
+                        )
+                    }
                 }
             }
-        }
-
-        if library.showsTodos {
+        case PanelSection.todos:
             TodoSection(library: library, focus: $focus)
-        }
-
-        NotesSection(library: library, focus: $focus)
-
-        if !library.pinned.isEmpty {
-            CollapsibleHeader(
-                library: library, title: L10n.pinnedTitle,
-                section: PanelSection.pinned, count: library.pinned.count
-            )
-            if !library.isCollapsed(PanelSection.pinned) {
-                ForEach(library.pinned) { item in
-                    PinnedCard(library: library, item: item, focus: $focus)
-                        .id(RowID.pinnedCard(item.id))
+        case PanelSection.notes:
+            NotesSection(library: library, focus: $focus)
+        case PanelSection.pinned:
+            if !library.pinned.isEmpty {
+                CollapsibleHeader(
+                    library: library, title: L10n.pinnedTitle,
+                    section: PanelSection.pinned, count: library.pinned.count
+                )
+                if !library.isCollapsed(PanelSection.pinned) {
+                    ForEach(library.pinned) { item in
+                        PinnedCard(library: library, item: item, focus: $focus)
+                            .id(RowID.pinnedCard(item.id))
+                    }
                 }
             }
-        }
-
-        if !library.recent.isEmpty {
-            CollapsibleHeader(
-                library: library, title: L10n.recentTitle,
-                section: PanelSection.recent, count: library.recent.count
-            )
-            if !library.isCollapsed(PanelSection.recent) {
-                ForEach(library.recent) { session in
-                    SessionRow(
-                        library: library, session: session,
-                        rowKey: RowKey.recent(session.id), detail: session.placeLabel
-                    )
+        case PanelSection.recent:
+            if !library.recent.isEmpty {
+                CollapsibleHeader(
+                    library: library, title: L10n.recentTitle,
+                    section: PanelSection.recent, count: library.recent.count
+                )
+                if !library.isCollapsed(PanelSection.recent) {
+                    ForEach(library.recent) { session in
+                        SessionRow(
+                            library: library, session: session,
+                            rowKey: RowKey.recent(session.id), detail: session.placeLabel
+                        )
+                    }
                 }
             }
-        }
-
-        TimeSection(library: library)
-
-        WeekSection(library: library, focus: $focus)
-
-        CollapsibleHeader(
-            library: library, title: L10n.projectsTitle,
-            section: PanelSection.projects, count: library.projects.count
-        ) {
-            ProjectListMenu(library: library)
-        }
-        if !library.isCollapsed(PanelSection.projects) {
-            ForEach(library.projects) { project in
-                ProjectSection(library: library, project: project, focus: $focus)
-                    .id(RowID.project(project.key))
+        case PanelSection.time:
+            TimeSection(library: library)
+        case PanelSection.week:
+            WeekSection(library: library, focus: $focus)
+        default:
+            CollapsibleHeader(
+                library: library, title: L10n.projectsTitle,
+                section: PanelSection.projects, count: library.projects.count
+            ) {
+                ProjectListMenu(library: library)
             }
-            if library.projects.isEmpty, !library.allProjects.isEmpty {
-                Text(L10n.allProjectsHidden)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+            if !library.isCollapsed(PanelSection.projects) {
+                ForEach(library.projects) { project in
+                    ProjectSection(library: library, project: project, focus: $focus)
+                        .id(RowID.project(project.key))
+                }
+                if library.projects.isEmpty, !library.allProjects.isEmpty {
+                    Text(L10n.allProjectsHidden)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                }
             }
         }
     }
@@ -433,8 +451,8 @@ struct CollapsibleHeader<Trailing: View>: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 8)
-                .padding(.top, 16)
-                .padding(.bottom, 4)
+                .padding(.top, 20)
+                .padding(.bottom, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -515,6 +533,8 @@ struct SessionRow: View {
     var matchRow: Int?
 
     @State private var hovering = Snapshot.showsHover
+    @State private var draft = ""
+    @FocusState private var naming: Bool
 
     var body: some View {
         let style = RowStyle(selected: library.selection == rowKey)
@@ -526,10 +546,25 @@ struct SessionRow: View {
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
-                    Text(session.title)
-                        .font(.system(size: 13))
-                        .foregroundStyle(style.title)
-                        .lineLimit(1)
+                    if library.renamingRow == rowKey {
+                        TextField(session.originalTitle, text: $draft)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
+                            .focused($naming)
+                            .onSubmit { library.rename(session, to: draft) }
+                            .onAppear {
+                                draft = session.title
+                                DispatchQueue.main.async { naming = true }
+                            }
+                            .onChange(of: naming) { _, focused in
+                                if !focused, library.renamingRow == rowKey { library.rename(session, to: draft) }
+                            }
+                    } else {
+                        Text(session.title)
+                            .font(.system(size: 13))
+                            .foregroundStyle(style.title)
+                            .lineLimit(1)
+                    }
                     ForEach(library.tags(for: session).prefix(3)) { tag in
                         TagMark(color: style.selected ? Color.white : TagPalette.color(tag.color))
                             .help(tag.name)
@@ -589,7 +624,7 @@ struct SessionRow: View {
         }
         .padding(.leading, 8 + inset)
         .padding(.trailing, 8)
-        .padding(.vertical, 6)
+        .padding(.vertical, library.compact ? 3 : 7)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous).fill(style.background(hovering: hovering))
         )
@@ -621,6 +656,10 @@ struct SessionRow: View {
         Divider()
         Button(pinned ? L10n.unpin : L10n.pin) { library.togglePin(session) }
         Button(L10n.addTask) { library.beginTask(linkedTo: .session(id: session.id, title: session.title)) }
+        Button(L10n.rename) { library.renamingRow = rowKey }
+        if session.localName != nil {
+            Button(L10n.restoreTitle) { library.rename(session, to: "") }
+        }
         Menu(L10n.tags) {
             ForEach(library.tags) { tag in
                 Toggle(tag.name, isOn: Binding(
@@ -676,6 +715,7 @@ struct ExpiryBanner: View {
     @ObservedObject var library: Library
 
     @State private var showsAll = false
+    @State private var expanded = false
     private static let shown = 3
 
     var body: some View {
@@ -683,20 +723,33 @@ struct ExpiryBanner: View {
         let listed = showsAll ? sessions : Array(sessions.prefix(Self.shown))
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.orange)
-                Text(L10n.expiringChats(sessions.count))
-                    .font(.system(size: 12))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                // One quiet line until it is opened onto the sessions it is about.
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.orange)
+                        Text(L10n.expiringChats(sessions.count))
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 Spacer(minLength: 8)
                 Button(L10n.backUp) { library.backUp(sessions) }
                     .controlSize(.small)
             }
             .help(L10n.expiryHelp(Retention.days))
             // Which sessions they are, the one with least time first. A click opens it.
-            VStack(spacing: 0) {
+            if expanded { VStack(spacing: 0) {
                 ForEach(listed) { session in
                     ExpiringRow(library: library, session: session)
                 }
@@ -714,12 +767,12 @@ struct ExpiryBanner: View {
                     }
                     .buttonStyle(.plain)
                 }
-            }
+            } }
         }
         .padding(.leading, 12)
         .padding(.trailing, 8)
-        .padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.orange.opacity(0.12)))
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.orange.opacity(0.10)))
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
     }
@@ -1598,7 +1651,7 @@ struct TimeSection: View {
         }
         .buttonStyle(.plain)
         .help(L10n.changePeriod)
-        .padding(.top, 10)
+        .padding(.top, 14)
     }
 }
 
@@ -2615,6 +2668,7 @@ struct SettingsView: View {
                             SettingsRow(title: L10n.openPanelShortcut) { shortcutButton(.panel) }
                             SettingsRow(title: L10n.quickTaskShortcut) { shortcutButton(.quickTask) }
                             SettingsRow(title: L10n.quickNoteShortcut) { shortcutButton(.quickNote) }
+                            SettingsRow(title: L10n.switcherShortcut) { shortcutButton(.switcher) }
                         }
                     }
                     SettingsGroup {
@@ -2707,17 +2761,10 @@ struct SettingsView: View {
                                 .controlSize(.small)
                         }
                     }
+                    SectionsEditor(library: library)
                     SettingsGroup {
-                        SettingsRow(title: L10n.showTodos) {
-                            Toggle("", isOn: $library.showsTodos)
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
-                        }
-                    }
-                    SettingsGroup {
-                        SettingsRow(title: L10n.showWeek) {
-                            Toggle("", isOn: $library.showsWeek)
+                        SettingsRow(title: L10n.dayEndSetting) {
+                            Toggle("", isOn: $library.showsDayEnd)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
@@ -2725,12 +2772,6 @@ struct SettingsView: View {
                     }
                     SettingsGroup {
                         VStack(spacing: 0) {
-                            SettingsRow(title: L10n.showTime) {
-                                Toggle("", isOn: $library.showsTime)
-                                    .labelsHidden()
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-                            }
                             SettingsRow(title: L10n.followWork) {
                                 Toggle("", isOn: $library.startsTimerAutomatically)
                                     .labelsHidden()
@@ -3072,6 +3113,360 @@ struct ReleaseNotesView: View {
     }
 }
 
+/// Everything about one project on one screen: its time, its open tasks, its chats and its folders.
+struct ProjectPage: View {
+    @ObservedObject var library: Library
+    let project: ProjectGroup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        StatTile(value: worked(.today), label: L10n.today)
+                        StatTile(value: worked(.week), label: L10n.weekTitle)
+                        StatTile(value: worked(.month), label: L10n.thisMonth)
+                    }
+                    .padding(.horizontal, 2)
+                    .padding(.top, 4)
+
+                    SettingsGroup {
+                        VStack(spacing: 0) {
+                            SettingsRow(title: L10n.openMethodMenu) {
+                                Picker(L10n.openMethodMenu, selection: Binding(
+                                    get: { library.projectOpenMethods[project.key] },
+                                    set: { library.setOpenMethod($0, for: project) }
+                                )) {
+                                    Text(L10n.useGeneralSetting).tag(OpenMethod?.none)
+                                    ForEach(library.openMethods, id: \.self) { method in
+                                        Text(method.title).tag(OpenMethod?.some(method))
+                                    }
+                                }
+                                .labelsHidden()
+                                .controlSize(.small)
+                                .fixedSize()
+                            }
+                        }
+                    }
+                    .padding(.top, 10)
+
+                    let tasks = library.tasks(of: project)
+                    if !tasks.isEmpty {
+                        SectionHeader(title: L10n.todosTitle)
+                        ForEach(tasks) { task in
+                            TaskRow(library: library, task: task, listedDay: library.today, list: tasks)
+                                .id(RowID.todo(task.id))
+                        }
+                    }
+
+                    SectionHeader(title: L10n.sessions(project.sessions.count))
+                    ForEach(project.sessions) { session in
+                        SessionRow(
+                            library: library, session: session,
+                            rowKey: RowKey.page(session.id), detail: firstLine(session.lastPrompt)
+                        )
+                    }
+
+                    if !project.folders.isEmpty {
+                        SectionHeader(title: L10n.folders(project.folders.count))
+                        ForEach(project.folders, id: \.self) { folder in
+                            Button {
+                                Opener.revealFolder(folder)
+                            } label: {
+                                HStack(spacing: 7) {
+                                    Image(systemName: "folder")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.tertiary)
+                                    Text(Format.path(folder))
+                                        .font(.system(size: 12))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(L10n.showInFinder)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 12)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var header: some View {
+        let timing = library.isTiming(project.key)
+        return HStack(alignment: .top, spacing: 6) {
+            Button {
+                library.projectPage = nil
+                library.focusRequest += 1
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.back)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.accentColor)
+                    Text(project.name)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineLimit(1)
+                }
+                Text(L10n.lastActivity(Format.date(project.lastActivity)))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 2)
+            Spacer(minLength: 8)
+            HStack(spacing: 6) {
+                Button {
+                    library.toggleTimer(forProject: project.key)
+                } label: {
+                    Image(systemName: timing ? "stop.fill" : "play.fill")
+                        .font(.system(size: 9))
+                }
+                .help(timing ? L10n.stopTimer : L10n.startTimer)
+                Button(L10n.newChat) { library.startSession(in: project) }
+                    .help(L10n.startChatHere)
+            }
+            .controlSize(.small)
+            .padding(.top, 3)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+        .background(WindowDragArea())
+    }
+
+    private func worked(_ period: TimePeriod) -> String {
+        library.time(for: project.key, in: period).map { Format.worked($0.total) } ?? "—"
+    }
+
+    private func firstLine(_ text: String?) -> String? {
+        text?.split(whereSeparator: \.isNewline).first.map { String($0) }
+    }
+}
+
+/// The day at a glance, offered in the evening: how long, on what, and a summary to copy.
+struct DayEndCard: View {
+    @ObservedObject var library: Library
+
+    var body: some View {
+        let summary = library.daySummary
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Image(systemName: "moon.stars")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.indigo)
+                Text(L10n.dayEndTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button {
+                    Opener.copy(library.daySummaryText)
+                    library.show(notice: L10n.summaryCopied)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 11))
+                        .frame(width: 22, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(L10n.copySummary)
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { library.dismissDayEndCard() }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 22, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(L10n.hideForToday)
+            }
+            HStack(spacing: 6) {
+                StatTile(value: Format.worked(summary.worked), label: L10n.worked)
+                StatTile(value: Format.count(summary.chats), label: L10n.chats)
+                StatTile(value: Format.count(summary.prompts), label: L10n.prompts)
+            }
+            if !summary.projects.isEmpty {
+                let peak = summary.projects.first?.total ?? 1
+                VStack(spacing: 7) {
+                    ForEach(summary.projects.prefix(4)) { row in
+                        HStack(spacing: 8) {
+                            Circle().fill(TimePalette.color(row.color)).frame(width: 7, height: 7)
+                            Text(row.name)
+                                .font(.system(size: 12))
+                                .lineLimit(1)
+                                .frame(width: 110, alignment: .leading)
+                            GeometryReader { proxy in
+                                Capsule()
+                                    .fill(TimePalette.color(row.color).opacity(0.75))
+                                    .frame(width: max(proxy.size.width * CGFloat(row.total / max(peak, 1)), 4))
+                            }
+                            .frame(height: 5)
+                            Text(Format.worked(row.total))
+                                .font(.system(size: 11))
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 70, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [Color.indigo.opacity(0.14), Color.indigo.opacity(0.05)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.indigo.opacity(0.18), lineWidth: 1)
+        )
+        .padding(.top, 12)
+    }
+}
+
+/// The row of tabs under the search field.
+struct TabBar: View {
+    @ObservedObject var library: Library
+    @Namespace private var highlight
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(PanelTab.allCases, id: \.self) { tab in
+                button(tab)
+            }
+        }
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.05)))
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+    }
+
+    private func button(_ tab: PanelTab) -> some View {
+        let selected = library.tab == tab
+        let badge = tab == .today ? library.needsYou.count : 0
+        return Button {
+            withAnimation(.easeOut(duration: 0.16)) { library.tab = tab }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: tab.symbol)
+                    .font(.system(size: 11, weight: .medium))
+                Text(tab.title)
+                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .frame(minWidth: 16, minHeight: 15)
+                        .background(Capsule().fill(Color.orange))
+                }
+            }
+            .foregroundStyle(selected ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+            .frame(maxWidth: .infinity)
+            .frame(height: 26)
+            .background {
+                if selected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(0.10))
+                        .matchedGeometryEffect(id: "tab", in: highlight)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// The sections of the browse list: which are shown, in what order, and how tightly.
+struct SectionsEditor: View {
+    @ObservedObject var library: Library
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(L10n.sectionsTitle)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(L10n.resetOrder) { library.resetSections() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 4)
+            SettingsGroup {
+                VStack(spacing: 0) {
+                    ForEach(Array(library.sectionOrder.enumerated()), id: \.element) { index, section in
+                        row(section, index: index)
+                    }
+                    SettingsRow(title: L10n.compactRows) {
+                        Toggle("", isOn: $library.compact)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(_ section: String, index: Int) -> some View {
+        let shown = library.isShown(section)
+        return HStack(spacing: 6) {
+            Text(PanelSection.title(section))
+                .font(.system(size: 13))
+                .foregroundStyle(shown ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+            Spacer(minLength: 8)
+            arrow("chevron.up", enabled: index > 0) { library.moveSection(section, by: -1) }
+            arrow("chevron.down", enabled: index < library.sectionOrder.count - 1) { library.moveSection(section, by: 1) }
+            Toggle("", isOn: Binding(get: { shown }, set: { library.setShown(section, $0) }))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .padding(.leading, 4)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+    }
+
+    private func arrow(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { action() }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.3)
+    }
+}
+
 /// One rounded block of settings rows.
 struct SettingsGroup<Content: View>: View {
     @ViewBuilder var content: Content
@@ -3209,6 +3604,9 @@ struct ProjectSection: View {
                 IconButton(symbol: "terminal", help: L10n.startChatHere, style: RowStyle(selected: false)) {
                     library.startSession(in: project)
                 }
+                IconButton(symbol: "info.circle", help: L10n.projectPage, style: RowStyle(selected: false)) {
+                    library.showPage(of: project)
+                }
             }
             Text(RelativeTime.short(project.lastActivity))
                 .font(.system(size: 11))
@@ -3216,7 +3614,7 @@ struct ProjectSection: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 7)
+        .padding(.vertical, library.compact ? 4 : 7)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.primary.opacity(hovering ? 0.08 : (expanded ? 0.045 : 0)))
@@ -3231,6 +3629,7 @@ struct ProjectSection: View {
     }
 
     @ViewBuilder private var menu: some View {
+        Button(L10n.projectPage) { library.showPage(of: project) }
         Button(L10n.startChat) { library.startSession(in: project) }
         Button(L10n.addTask) { library.beginTask(linkedTo: .project(key: project.key, name: project.name)) }
         Button(library.isTiming(project.key) ? L10n.stopTimer : L10n.startTimer) {

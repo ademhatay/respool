@@ -175,6 +175,16 @@ if let output = value(after: "--snapshot") {
                 done: LiveSession(pid: 1, state: .idle, waitingFor: nil, desktopID: nil),
             ])
         }
+        if let name = value(after: "--tab"), let chosen = PanelTab(rawValue: name) { library.tab = chosen }
+        if arguments.contains("--dayend") { library.dayEndHour = 0 }
+        if let name = value(after: "--page"), let project = library.allProjects.first(where: { $0.name == name }) {
+            library.showPage(of: project)
+        }
+        if let typed = value(after: "--switcher") {
+            let ok = Snapshot.renderSwitcher(library: library, query: typed == "-" ? "" : typed, to: output, dark: arguments.contains("--dark"))
+            print(ok ? "wrote \(output)" : "snapshot failed")
+            exit(ok ? 0 : 1)
+        }
         if arguments.contains("--onboarding") {
             let ok = Snapshot.renderWelcome(library: library, to: output, dark: arguments.contains("--dark"))
             print(ok ? "wrote \(output)" : "snapshot failed")
@@ -475,11 +485,14 @@ if arguments.contains("--selftest") {
             for section in [PanelSection.recent, PanelSection.week] where library.isCollapsed(section) {
                 library.toggleSection(section)
             }
-            if let last = library.recent.last, let first = day.work.first {
-                library.selection = RowKey.recent(last.id)
+            if let first = day.work.first {
+                // The week is on the Time tab; the arrow keys walk the tab that is showing.
+                library.tab = .time
+                library.selection = nil
                 library.moveSelection(1)
-                check("keyboard navigation walks from the recents into the week",
+                check("keyboard navigation walks the week on its own tab",
                       library.selection == RowKey.day(day.day, first.id))
+                library.tab = .chats
             }
         }
         check("a day's row still names its session", RowKey.sessionID(RowKey.day(today, "abc")) == "abc")
@@ -548,6 +561,7 @@ if arguments.contains("--selftest") {
             check("a session left to itself opens the automatic way", asked == library.openMethod(for: member))
             if let fresh = library.allProjects.flatMap(\.sessions).first(where: {
                 library.desktopID(for: $0.id) == nil && $0.entrypoint != "claude-vscode" && $0.id != member.id
+                    && library.projectHosts[$0.projectKey] == nil && library.live[$0.id] == nil
             }) {
                 check("a session never seen running opens where its kind lives", library.openMethod(for: fresh) == .automatic)
                 library.remember(host: .terminal, for: fresh)
@@ -630,6 +644,55 @@ if arguments.contains("--selftest") {
         check("an empty transcripts folder removes nothing either", hollow.removed == 0 && library.sessionCount == before)
         unsetenv("RESPOOL_TRANSCRIPTS")
         try? FileManager.default.removeItem(at: empty)
+
+        // A name given in Respool only.
+        if let named = library.recent.first {
+            let own = named.title
+            library.rename(named, to: "Benim adım"); settle()
+            check("a chat can be given a name of its own", library.session(withID: named.id)?.title == "Benim adım")
+            check("the transcript's own title is kept", library.session(withID: named.id)?.originalTitle == own)
+            library.query = "Benim adım"; library.searchSync()
+            check("search finds a chat by the name given to it", library.results?.contains { $0.id == named.id } == true)
+            library.query = ""
+            library.rename(library.session(withID: named.id)!, to: ""); settle()
+            check("an empty name gives the chat its own title back", library.session(withID: named.id)?.title == own)
+        }
+
+        // The sections: their order, which are shown, and which tab each is on.
+        library.resetSections()
+        check("sections start in their usual order", library.sectionOrder == PanelSection.all)
+        library.moveSection(PanelSection.projects, by: -1)
+        check("a section moves up", library.sectionOrder.firstIndex(of: PanelSection.projects)! < library.sectionOrder.firstIndex(of: PanelSection.week)!)
+        library.setShown(PanelSection.notes, false)
+        check("a section can be hidden", !library.isShown(PanelSection.notes))
+        library.quickNote()
+        check("the quick note brings its section back, on Today", library.isShown(PanelSection.notes) && library.tab == .today)
+        library.resetSections()
+        check("every section belongs to one tab", Set(PanelSection.all.map(PanelTab.of)) == Set(PanelTab.allCases))
+        library.tab = .chats
+
+        // The quick switcher.
+        if let project = library.projects.first(where: { $0.name.count >= 3 }) {
+            let typed = String(project.name.prefix(3))
+            let items = library.switcherItems(for: typed)
+            check("the switcher finds a project by the start of its name", items.contains(.project(project)))
+            check("it offers at most nine things", items.count <= 9)
+        }
+        check("with nothing typed the switcher offers recent chats", !library.switcherItems(for: "").isEmpty
+              && library.switcherItems(for: "").allSatisfy { if case .session = $0 { return true } else { return false } })
+
+        // The day's summary.
+        library.dayEndHour = 24
+        check("the day's summary waits for the evening", !library.showsDayEndCard)
+        library.dayEndHour = 0
+        let summary = library.daySummary
+        check("the summary's time is today's", summary.worked == (library.timeReports[.today]?.total ?? 0))
+        if library.showsDayEndCard {
+            library.dismissDayEndCard()
+            check("a summary put away stays away today", !library.showsDayEndCard)
+        }
+        check("the summary copies as text", library.daySummaryText.contains("·"))
+        library.dayEndHour = 17
 
         // Sessions that want the user.
         if let probe = library.recent.first {
@@ -797,7 +860,7 @@ if arguments.contains("--selftest") {
         library.quickTask()
         check("quick task asks for focus", library.todoFocusRequest > 0 && library.taskLink == nil)
         check("shortcut kinds save under their own names",
-              Set(ShortcutKind.allCases.map(\.rawValue)).count == 3 && ShortcutKind.quickTask.fallback != ShortcutKind.quickNote.fallback)
+              Set(ShortcutKind.allCases.map(\.rawValue)).count == ShortcutKind.allCases.count && ShortcutKind.quickTask.fallback != ShortcutKind.quickNote.fallback)
         let screen = NSRect(x: 0, y: 0, width: 1470, height: 900)
         let frames = PanelEdge.edges.map { PanelController.frame(for: $0, in: screen) }
         check("every edge keeps the panel on the screen", frames.allSatisfy { screen.contains($0) })
@@ -806,6 +869,7 @@ if arguments.contains("--selftest") {
 
         library.togglePin(session); settle()
         check("unpin", library.pinned.isEmpty)
+        library.tab = .chats
         check("navigation moves down", { library.moveSelection(1); return library.selection != nil }())
         print("all checks passed")
         exit(0)

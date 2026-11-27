@@ -482,6 +482,24 @@ enum L10n {
         tr("Erişilebilirlik izni gerekiyor", "Needs the Accessibility permission")
     }
     static var allow: String { tr("İzin ver", "Allow") }
+    static var restoreTitle: String { tr("Asıl adına döndür", "Restore its own title") }
+    static var sectionsTitle: String { tr("Bölümler", "Sections") }
+    static var resetOrder: String { tr("Sıfırla", "Reset") }
+    static var compactRows: String { tr("Sık satırlar", "Compact rows") }
+    static var projectPage: String { tr("Proje sayfası", "Project page") }
+    static var newChat: String { tr("Yeni sohbet", "New chat") }
+    static var switcherShortcut: String { tr("Hızlı geçiş", "Quick switcher") }
+    static var switcherPlaceholder: String { tr("Sohbet ya da proje ara", "Search chats and projects") }
+    static var projectTag: String { tr("Proje", "Project") }
+    static var close: String { tr("Kapat", "Close") }
+    static var chatsTab: String { tr("Sohbetler", "Chats") }
+    static var dayEndTitle: String { tr("Günün özeti", "Your day") }
+    static var dayEndSetting: String { tr("Akşam gün özetini göster", "Show the day's summary in the evening") }
+    static var copySummary: String { tr("Özeti kopyala", "Copy the summary") }
+    static var summaryCopied: String { tr("Özet panoya kopyalandı", "Summary copied") }
+    static var hideForToday: String { tr("Bugünlük gizle", "Hide for today") }
+    static var summaryChats: String { tr("Sohbetler:", "Chats:") }
+    static func summaryHeading(_ day: String, _ worked: String) -> String { tr("\(day) · \(worked)", "\(day) · \(worked)") }
     static var themeTitle: String { tr("Tema", "Theme") }
     static var themeLight: String { tr("Açık", "Light") }
     static var themeDark: String { tr("Koyu", "Dark") }

@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var observers = Set<AnyCancellable>()
     private var clock: Timer?
     private var onboarding: OnboardingController?
+    private var switcher: SwitcherController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if isAlreadyRunning() {
@@ -119,8 +120,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        let switcher = SwitcherController(library: library)
+        switcher.onShowProject = { [weak controller, weak library] project in
+            controller?.show()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { library?.showPage(of: project) }
+        }
+        self.switcher = switcher
         hotKeys = [
             HotKey(.panel) { [weak controller] in controller?.toggle() },
+            HotKey(.switcher) { [weak switcher] in switcher?.toggle() },
             HotKey(.quickTask, action: capture { $0.quickTask() }),
             HotKey(.quickNote, action: capture { $0.quickNote() }),
         ]

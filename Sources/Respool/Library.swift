@@ -102,6 +102,35 @@ final class Library: ObservableObject {
     @Published var showsWeek = true {
         didSet { UserDefaults.standard.set(showsWeek, forKey: "showsWeek") }
     }
+    /// The order of the sections in the browse list, as rearranged in Settings.
+    @Published private(set) var sectionOrder: [String] {
+        didSet { UserDefaults.standard.set(sectionOrder, forKey: "sectionOrder") }
+    }
+    /// Sections turned off in Settings, besides the three that have their own switch.
+    @Published private(set) var hiddenSections: Set<String> {
+        didSet { UserDefaults.standard.set(Array(hiddenSections), forKey: "hiddenSections") }
+    }
+    /// Offers the day's summary at the top of Today from the evening on.
+    @Published var showsDayEnd: Bool {
+        didSet { UserDefaults.standard.set(showsDayEnd, forKey: "showsDayEnd") }
+    }
+    /// The day whose summary was put away, so it stays away until tomorrow.
+    @Published private var dayEndDismissed: String {
+        didSet { UserDefaults.standard.set(dayEndDismissed, forKey: "dayEndDismissed") }
+    }
+    /// The hour from which the summary is offered. Set by the self-test and screenshots.
+    var dayEndHour = 17
+    /// The view of the panel that is showing.
+    @Published var tab: PanelTab {
+        didSet {
+            UserDefaults.standard.set(tab.rawValue, forKey: "panelTab")
+            selection = nil
+        }
+    }
+    /// Tighter rows, for more of the list on screen.
+    @Published var compact: Bool {
+        didSet { UserDefaults.standard.set(compact, forKey: "compact") }
+    }
     /// This week's work, one entry for each day that had any, today first.
     @Published private(set) var week: [DaySummary] = []
     /// Which days were opened or closed by hand. A day not named here is open when it is today.
@@ -240,6 +269,10 @@ final class Library: ObservableObject {
     @Published var showingAll: Set<String> = []
     @Published var addingTaskFor: String?
     @Published var renamingProject: String?
+    /// The project whose page is open in the panel.
+    @Published var projectPage: String?
+    /// The row whose session is being given a name of its own.
+    @Published var renamingRow: String?
     @Published var focusRequest = 0
     /// Empty when the global shortcut could not be registered (another app owns it).
     @Published var shortcutLabels: [ShortcutKind: String] = [:]
@@ -310,6 +343,18 @@ final class Library: ObservableObject {
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
         panelEdge = UserDefaults.standard.string(forKey: "panelEdge").flatMap(PanelEdge.init) ?? .right
         showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true
+        // Sections added in later versions join a saved order at their usual place.
+        let savedOrder = (UserDefaults.standard.stringArray(forKey: "sectionOrder") ?? []).filter(PanelSection.all.contains)
+        var order = savedOrder
+        for (index, section) in PanelSection.all.enumerated() where !order.contains(section) {
+            order.insert(section, at: min(index, order.count))
+        }
+        sectionOrder = order
+        hiddenSections = Set(UserDefaults.standard.stringArray(forKey: "hiddenSections") ?? [])
+        compact = UserDefaults.standard.bool(forKey: "compact")
+        tab = UserDefaults.standard.string(forKey: "panelTab").flatMap(PanelTab.init) ?? .chats
+        showsDayEnd = UserDefaults.standard.object(forKey: "showsDayEnd") as? Bool ?? true
+        dayEndDismissed = UserDefaults.standard.string(forKey: "dayEndDismissed") ?? ""
         showsWeek = UserDefaults.standard.object(forKey: "showsWeek") as? Bool ?? true
         collapsedSections = Set(UserDefaults.standard.stringArray(forKey: "collapsedSections") ?? [])
         notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
@@ -607,6 +652,11 @@ final class Library: ObservableObject {
         if let tagFilter, snapshot.tags.contains(where: { $0.id == tagFilter }) {
             snapshot.tagged = ordered.filter { $0.tagIDs.contains(tagFilter) }
         }
+        var localNames: [String: String] = [:]
+        try? readDB.query("SELECT session_id, name FROM session_names") { row in
+            if let id = row.text(0), let name = row.text(1) { localNames[id] = name }
+        }
+        for index in ordered.indices { ordered[index].localName = localNames[ordered[index].id] }
         snapshot.sessions = Dictionary(uniqueKeysWithValues: ordered.map { ($0.id, $0) })
 
         var mergedInto: [String: [String]] = [:]
@@ -921,19 +971,61 @@ final class Library: ObservableObject {
     private var visibleKeys: [String] {
         if let results { return results.map { RowKey.hit($0.id) } }
         if let tagged { return tagged.map { RowKey.tagged($0.id) } }
+        if let project = pageProject { return project.sessions.map { RowKey.page($0.id) } }
         var keys: [String] = []
-        if !isCollapsed(PanelSection.waiting) { keys += needsYou.map { RowKey.waiting($0.id) } }
-        if !isCollapsed(PanelSection.pinned) { keys += pinned.map { RowKey.pin($0.id) } }
-        if !isCollapsed(PanelSection.recent) { keys += recent.map { RowKey.recent($0.id) } }
-        if showsWeek, !isCollapsed(PanelSection.week) {
-            for day in week where isDayExpanded(day.day) { keys += day.work.map { RowKey.day(day.day, $0.id) } }
-        }
-        if !isCollapsed(PanelSection.projects) {
-            for project in projects where expanded.contains(project.key) {
-                keys += visibleSessions(in: project).map { RowKey.project($0.id) }
+        // In the order the sections are shown, so the arrow keys walk down the list as it reads.
+        for section in sectionOrder where PanelTab.of(section) == tab && isShown(section) && !isCollapsed(section) {
+            switch section {
+            case PanelSection.waiting: keys += needsYou.map { RowKey.waiting($0.id) }
+            case PanelSection.pinned: keys += pinned.map { RowKey.pin($0.id) }
+            case PanelSection.recent: keys += recent.map { RowKey.recent($0.id) }
+            case PanelSection.week:
+                for day in week where isDayExpanded(day.day) { keys += day.work.map { RowKey.day(day.day, $0.id) } }
+            case PanelSection.projects:
+                for project in projects where expanded.contains(project.key) {
+                    keys += visibleSessions(in: project).map { RowKey.project($0.id) }
+                }
+            default: break
             }
         }
         return keys
+    }
+
+    // MARK: - Sections
+
+    func isShown(_ section: String) -> Bool {
+        switch section {
+        case PanelSection.todos: return showsTodos
+        case PanelSection.week: return showsWeek
+        case PanelSection.time: return showsTime
+        default: return !hiddenSections.contains(section)
+        }
+    }
+
+    func setShown(_ section: String, _ shown: Bool) {
+        switch section {
+        case PanelSection.todos: showsTodos = shown
+        case PanelSection.week: showsWeek = shown
+        case PanelSection.time: showsTime = shown
+        default:
+            if shown { hiddenSections.remove(section) } else { hiddenSections.insert(section) }
+        }
+    }
+
+    /// Moves a section one place up (-1) or down (+1).
+    func moveSection(_ section: String, by step: Int) {
+        guard let index = sectionOrder.firstIndex(of: section) else { return }
+        let target = index + step
+        guard sectionOrder.indices.contains(target) else { return }
+        sectionOrder.swapAt(index, target)
+    }
+
+    func resetSections() {
+        sectionOrder = PanelSection.all
+        hiddenSections = []
+        showsTodos = true
+        showsWeek = true
+        showsTime = true
     }
 
     func moveSelection(_ delta: Int) {
@@ -1045,6 +1137,11 @@ final class Library: ObservableObject {
 
     /// Returns true when the panel should close.
     func handleEscape() -> Bool {
+        if renamingRow != nil {
+            renamingRow = nil
+            focusRequest += 1
+            return false
+        }
         if renamingProject != nil {
             renamingProject = nil
             focusRequest += 1
@@ -1058,6 +1155,11 @@ final class Library: ObservableObject {
         if showingReleaseNotes {
             // The notes are opened from Settings, and go back there.
             showingReleaseNotes = false
+            return false
+        }
+        if projectPage != nil, outline == nil {
+            projectPage = nil
+            focusRequest += 1
             return false
         }
         if showingSettings || outline != nil {
@@ -1742,6 +1844,53 @@ final class Library: ObservableObject {
         }
     }
 
+    // MARK: - Day end
+
+    struct DayEndSummary {
+        var worked: TimeInterval = 0
+        var chats = 0
+        var prompts = 0
+        var projects: [ProjectTime] = []
+    }
+
+    /// Today in figures: time worked, chats used, prompts typed, and the projects by time.
+    var daySummary: DayEndSummary {
+        let report = timeReports[.today] ?? TimeReport()
+        let day = week.first { $0.day == today }
+        return DayEndSummary(
+            worked: report.total, chats: day?.work.count ?? 0, prompts: day?.prompts ?? 0, projects: report.rows
+        )
+    }
+
+    /// True in the evening of a day with some work in it, unless it was put away.
+    var showsDayEndCard: Bool {
+        guard showsDayEnd, dayEndDismissed != today else { return false }
+        guard Calendar.current.component(.hour, from: Date()) >= dayEndHour else { return false }
+        let summary = daySummary
+        return summary.worked >= 60 || summary.prompts > 0
+    }
+
+    func dismissDayEndCard() {
+        dayEndDismissed = today
+    }
+
+    /// The day as plain text, for a stand-up note or a timesheet.
+    var daySummaryText: String {
+        let summary = daySummary
+        var lines = [L10n.summaryHeading(Format.day(Date()), Format.worked(summary.worked))]
+        for row in summary.projects {
+            lines.append("- \(row.name): \(Format.worked(row.total))")
+        }
+        if let day = week.first(where: { $0.day == today }) {
+            lines.append("")
+            lines.append(L10n.summaryChats)
+            for work in day.work.prefix(10) {
+                lines.append("- \(work.session.title) (\(work.session.projectName))")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Updates
 
     /// The release newer than this copy of the app, when one is known.
@@ -1857,6 +2006,7 @@ final class Library: ObservableObject {
     func quickTask() {
         taskLink = nil
         showBrowseList()
+        tab = .today
         showsTodos = true
         collapsedSections.remove(PanelSection.todos)
         todoFocusRequest += 1
@@ -1865,6 +2015,8 @@ final class Library: ObservableObject {
     /// Brings the note field up, ready to type. Called by the quick-note shortcut.
     func quickNote() {
         showBrowseList()
+        tab = .today
+        hiddenSections.remove(PanelSection.notes)
         collapsedSections.remove(PanelSection.notes)
         noteFocusRequest += 1
     }
@@ -1875,6 +2027,7 @@ final class Library: ObservableObject {
         showingSettings = false
         showingReleaseNotes = false
         outline = nil
+        projectPage = nil
     }
 
     func addNote(_ text: String) {
@@ -2010,6 +2163,44 @@ final class Library: ObservableObject {
             showingAll.remove(key)
         } else {
             expanded.insert(key)
+        }
+    }
+
+    /// Opens a project's page in the panel.
+    func showPage(of project: ProjectGroup) {
+        hover = nil
+        showingSettings = false
+        outline = nil
+        projectPage = project.key
+    }
+
+    /// The project a page is about, as the list knows it now.
+    var pageProject: ProjectGroup? {
+        projectPage.flatMap { key in allProjects.first { $0.key == key } }
+    }
+
+    /// The open tasks that belong to a project: linked to it, or to one of its sessions.
+    func tasks(of project: ProjectGroup) -> [TaskItem] {
+        let ids = Set(project.sessions.map(\.id))
+        let keys = Set([project.key] + project.mergedKeys)
+        return tasks.filter { task in
+            !task.done && (task.projectKey.map(keys.contains) == true || ids.contains(task.sessionID))
+        }
+    }
+
+    /// Gives a session a name that only Respool shows. An empty name, or the session's own
+    /// title, takes the name away again.
+    func rename(_ session: SessionRecord, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        renamingRow = nil
+        focusRequest += 1
+        guard trimmed != session.title else { return }
+        write { db in
+            if trimmed.isEmpty || trimmed == session.originalTitle {
+                try db.run("DELETE FROM session_names WHERE session_id = ?", [session.id])
+            } else {
+                try db.run("INSERT OR REPLACE INTO session_names(session_id, name) VALUES(?, ?)", [session.id, trimmed])
+            }
         }
     }
 

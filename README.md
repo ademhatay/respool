@@ -24,6 +24,21 @@ The screenshots show made-up data.
 
 ## What it does
 
+The panel has three tabs. **Today** holds what wants doing now: chats waiting for you, to-dos,
+notes and, from the evening on, a summary of the day. **Chats** holds pinned and recent chats and
+every project. **Time** holds where the time went. Settings decides which sections are shown, in
+what order, and whether rows are compact.
+
+- **Quick switcher.** `⌥⇧O` opens a search box in the middle of the screen. Type a few letters
+  of a chat or a project: `↩` opens a chat where it belongs, `⌘↩` in its editor, `⌥↩` in a
+  terminal; `↩` on a project shows its page and `⌘↩` starts a new chat in it.
+- **Project page.** A project's time, open tasks, chats, folders and where its chats open, on
+  one screen. Open it from the project's row, its context menu or the switcher.
+- **Day's summary.** From 17:00, Today starts with the day in figures: time worked, chats,
+  prompts and the projects by time, with a button that copies it as text. It can be put away
+  for the day, or turned off in Settings.
+- **Names of your own.** Rename a chat from its context menu. The name is kept by Respool only;
+  the transcript is not touched, and search finds the chat by either name.
 - **Search.** Searches session titles and the conversations themselves, and shows an excerpt
   of the match. The button on a result opens that session's prompts at the one that matched.
 - **Projects.** Groups sessions by git remote, so one repository checked out in several
@@ -58,8 +73,8 @@ The screenshots show made-up data.
   is drawn solid and the automatic part lighter.
 - **Notes.** Jot a line down from anywhere with the quick-note shortcut; turn it into a task later.
 - **Notifications.** When a session finishes or starts waiting for you, Respool posts a
-  notification and shows a count next to its menu bar icon. Clicking the notification opens
-  the session.
+  notification and shows a count next to its menu bar icon. The notification's Open button, or
+  a click on it, opens the session where it belongs.
 - **Deletion warning.** Claude Code deletes the transcript of a terminal session it has not
   written to for 30 days (`cleanupPeriodDays` in its settings); sessions the desktop app keeps
   are exempt. In a session's last week Respool marks its row and shows a bar at the top of the
@@ -105,6 +120,7 @@ The screenshots show made-up data.
 | `⌥⇧Space` | Open or close the panel (all three shortcuts can be changed in Settings) |
 | `⌥⇧T` | Open the panel on the task field |
 | `⌥⇧N` | Open the panel on the note field |
+| `⌥⇧O` | Open the quick switcher |
 | `↑` `↓` | Move through sessions |
 | `↩` | Open the selected session |
 | `⌘↩` | Show the selected session's prompts; from a search result, at the prompt that matched |

@@ -213,6 +213,7 @@ enum Schema {
         open INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS project_open(key TEXT PRIMARY KEY, method TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS session_names(session_id TEXT PRIMARY KEY, name TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS session_hosts(session_id TEXT PRIMARY KEY, method TEXT NOT NULL, seen REAL NOT NULL);
     """
 }

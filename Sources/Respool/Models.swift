@@ -6,6 +6,8 @@ struct SessionRecord: Identifiable, Hashable {
     var cwd: String
     var customTitle: String?
     var aiTitle: String?
+    /// A name given in Respool only. The transcript is never touched.
+    var localName: String?
     var firstPrompt: String?
     var lastPrompt: String?
     var lastActivity: Date?
@@ -32,6 +34,7 @@ struct SessionRecord: Identifiable, Hashable {
     var inOtherOrganization = false
 
     var title: String {
+        if let localName, !localName.isEmpty { return localName }
         if let customTitle, !customTitle.isEmpty { return customTitle }
         if let aiTitle, !aiTitle.isEmpty { return aiTitle }
         let prompt = (firstPrompt ?? lastPrompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -42,7 +45,14 @@ struct SessionRecord: Identifiable, Hashable {
     }
 
     var hasCustomTitle: Bool {
-        !(customTitle ?? "").isEmpty
+        !(customTitle ?? "").isEmpty || !(localName ?? "").isEmpty
+    }
+
+    /// The title the session would have without a name given in Respool.
+    var originalTitle: String {
+        var plain = self
+        plain.localName = nil
+        return plain.title
     }
 
     /// The project, plus the organization when the session lives in one that is not open.
@@ -281,6 +291,40 @@ enum PanelEdge: String, CaseIterable {
     }
 }
 
+/// The three views of the panel, so that it never shows everything at once.
+enum PanelTab: String, CaseIterable {
+    /// What wants doing now: chats waiting for you, to-dos, notes, and the day's summary.
+    case today
+    /// Pinned and recent chats, and every project.
+    case chats
+    /// Where the time went.
+    case time
+
+    var title: String {
+        switch self {
+        case .today: return L10n.today
+        case .chats: return L10n.chatsTab
+        case .time: return L10n.timeTitle
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .today: return "sun.max"
+        case .chats: return "bubble.left.and.bubble.right"
+        case .time: return "clock"
+        }
+    }
+
+    static func of(_ section: String) -> PanelTab {
+        switch section {
+        case PanelSection.waiting, PanelSection.todos, PanelSection.notes: return .today
+        case PanelSection.time, PanelSection.week: return .time
+        default: return .chats
+        }
+    }
+}
+
 enum PanelSection {
     static let waiting = "waiting"
     static let todos = "todos"
@@ -290,6 +334,22 @@ enum PanelSection {
     static let week = "week"
     static let time = "time"
     static let projects = "projects"
+
+    /// Every section of the browse list, in the order they come in unless rearranged.
+    static let all = [waiting, todos, notes, pinned, recent, time, week, projects]
+
+    static func title(_ section: String) -> String {
+        switch section {
+        case waiting: return L10n.waitingTitle
+        case todos: return L10n.todosTitle
+        case notes: return L10n.notesTitle
+        case pinned: return L10n.pinnedTitle
+        case recent: return L10n.recentTitle
+        case time: return L10n.timeTitle
+        case week: return L10n.weekTitle
+        default: return L10n.projectsTitle
+        }
+    }
 }
 
 enum Format {
@@ -505,6 +565,7 @@ enum RowKey {
     static func hit(_ id: String) -> String { "hit:" + id }
     static func tagged(_ id: String) -> String { "tagged:" + id }
     static func waiting(_ id: String) -> String { "waiting:" + id }
+    static func page(_ id: String) -> String { "page:" + id }
 
     static func sessionID(_ key: String) -> String {
         // A day's rows name the day as well: day:<day>:<session id>.

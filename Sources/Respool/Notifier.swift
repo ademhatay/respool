@@ -11,7 +11,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         super.init()
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        // An Open button on the banner, which opens the chat where it belongs.
+        let open = UNNotificationAction(identifier: Self.openAction, title: L10n.open, options: [.foreground])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.sessionCategory, actions: [open], intentIdentifiers: [])
+        ])
     }
+
+    private static let sessionCategory = "session"
+    private static let openAction = "open"
 
     func post(sessionID: String, title: String, body: String) {
         let content = UNMutableNotificationContent()
@@ -19,6 +27,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.body = body
         content.sound = .default
         content.userInfo = ["sessionID": sessionID]
+        content.categoryIdentifier = Self.sessionCategory
         // One notification per session: a newer state replaces the older one.
         let request = UNNotificationRequest(identifier: sessionID, content: content, trigger: nil)
         center.add(request)
@@ -39,7 +48,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        guard let sessionID = response.notification.request.content.userInfo["sessionID"] as? String else { return }
+        // A click on the banner and its Open button both open the chat; dismissing it does not.
+        guard response.actionIdentifier != UNNotificationDismissActionIdentifier,
+              let sessionID = response.notification.request.content.userInfo["sessionID"] as? String else { return }
         await MainActor.run { onOpen(sessionID) }
     }
 }

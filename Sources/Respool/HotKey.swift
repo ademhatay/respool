@@ -14,6 +14,8 @@ struct Shortcut: Equatable {
     static let quickTask = Shortcut(keyCode: kVK_ANSI_T, modifiers: optionKey | shiftKey, label: "⌥⇧T")
     /// Opens the panel on the note field.
     static let quickNote = Shortcut(keyCode: kVK_ANSI_N, modifiers: optionKey | shiftKey, label: "⌥⇧N")
+    /// Opens the quick switcher in the middle of the screen.
+    static let switcher = Shortcut(keyCode: kVK_ANSI_O, modifiers: optionKey | shiftKey, label: "⌥⇧O")
 
     /// The shortcut saved under a name, or the fallback when none was ever recorded.
     static func saved(as name: String, fallback: Shortcut) -> Shortcut {
@@ -73,12 +75,14 @@ enum ShortcutKind: String, CaseIterable {
     case panel = "shortcut"
     case quickTask = "taskShortcut"
     case quickNote = "noteShortcut"
+    case switcher = "switcherShortcut"
 
     var fallback: Shortcut {
         switch self {
         case .panel: return .standard
         case .quickTask: return .quickTask
         case .quickNote: return .quickNote
+        case .switcher: return .switcher
         }
     }
 
@@ -87,6 +91,7 @@ enum ShortcutKind: String, CaseIterable {
         case .panel: return 1
         case .quickTask: return 2
         case .quickNote: return 3
+        case .switcher: return 4
         }
     }
 }
