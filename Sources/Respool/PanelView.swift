@@ -222,6 +222,7 @@ struct PanelView: View {
             if !library.isCollapsed(PanelSection.pinned) {
                 ForEach(library.pinned) { item in
                     PinnedCard(library: library, item: item, focus: $focus)
+                        .id(RowID.pinnedCard(item.id))
                 }
             }
         }
@@ -254,6 +255,7 @@ struct PanelView: View {
         if !library.isCollapsed(PanelSection.projects) {
             ForEach(library.projects) { project in
                 ProjectSection(library: library, project: project, focus: $focus)
+                    .id(RowID.project(project.key))
             }
             if library.projects.isEmpty, !library.allProjects.isEmpty {
                 Text(L10n.allProjectsHidden)
@@ -382,6 +384,19 @@ struct PanelView: View {
 }
 
 // MARK: - Building blocks
+
+/// Identities for the rows of the panel's list. Every kind of row gets its own prefix: the list
+/// is one lazy stack, and two rows with the same identity (a project's time row and the
+/// project itself, or a note and a task with the same number) are mixed up when it is drawn,
+/// one drawn in the other's place and a gap left behind.
+enum RowID {
+    static func todo(_ id: Int64) -> String { "todo-row:\(id)" }
+    static func note(_ id: Int64) -> String { "note-row:\(id)" }
+    static func day(_ day: String) -> String { "week-day:" + day }
+    static func time(_ key: String) -> String { "time-row:" + key }
+    static func pinnedCard(_ id: String) -> String { "pinned-card:" + id }
+    static func project(_ key: String) -> String { "project-row:" + key }
+}
 
 /// A section title that hides or shows its section when clicked. `trailing` sits at its right
 /// edge, outside the button, for a control of the section's own.
@@ -809,17 +824,20 @@ struct TodoSection: View {
             groupTitle(L10n.overdue)
             ForEach(overdue) { task in
                 TaskRow(library: library, task: task, listedDay: day, list: overdue)
+                    .id(RowID.todo(task.id))
             }
         }
         let due = library.tasks(on: day)
         ForEach(due) { task in
             TaskRow(library: library, task: task, listedDay: day, list: due)
+                .id(RowID.todo(task.id))
         }
         let undated = library.undatedTasks
         if !undated.isEmpty {
             groupTitle(L10n.noDate)
             ForEach(undated) { task in
                 TaskRow(library: library, task: task, listedDay: day, list: undated)
+                    .id(RowID.todo(task.id))
             }
         }
     }
@@ -1064,6 +1082,7 @@ struct NotesSection: View {
             .padding(.vertical, 5)
             ForEach(library.notes) { note in
                 NoteRow(library: library, note: note)
+                    .id(RowID.note(note.id))
             }
         }
     }
@@ -1426,6 +1445,7 @@ struct WeekSection: View {
             if !library.isCollapsed(PanelSection.week) {
                 ForEach(library.week) { day in
                     DayRow(library: library, day: day)
+                        .id(RowID.day(day.day))
                     if library.isDayExpanded(day.day) {
                         ForEach(day.work) { work in
                             SessionRow(
@@ -1535,6 +1555,7 @@ struct TimeSection: View {
                             library: library, row: row, peak: peak,
                             axis: library.timePeriod == .today ? axis : nil
                         )
+                        .id(RowID.time(row.key))
                     }
                     if report.rows.count > rows.count {
                         Button {
