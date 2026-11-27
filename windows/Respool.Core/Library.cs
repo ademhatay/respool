@@ -886,9 +886,25 @@ public sealed class Library : IDisposable
         string? ProjectOf(string id) => Session(id) is { } session && !Current.Hidden.Contains(session.ProjectKey) ? session.ProjectKey : null;
         var workingIds = current.Values.Where(session => session.State == LiveState.Working).Select(session => session.SessionId).OrderBy(id => id, StringComparer.Ordinal).ToList();
         var working = workingIds.Select(ProjectOf).OfType<string>().ToHashSet();
+        // Projects with a Claude Code running at all, working or not.
+        var open = current.Keys.Select(ProjectOf).OfType<string>().ToHashSet();
+        // A chat too new to be in the index could belong to any project, so nothing counts as closed then.
+        var unknown = current.Keys.Any(id => Session(id) is null);
         var started = workingIds.Where(id => !_previouslyWorking.Contains(id)).Select(ProjectOf).OfType<string>().Distinct().ToList();
         _previouslyWorking = workingIds.ToHashSet();
         if (!Settings.StartsTimerAutomatically) return;
+
+        // A timer running when Respool starts was most likely started by following work
+        // before a restart; it goes on being followed, so it can stop by itself.
+        if (!_followChecked && HasLoaded)
+        {
+            _followChecked = true;
+            if (Current.RunningTimer is { } adopted && _followedProject is null)
+            {
+                _followedProject = adopted.ProjectKey;
+                _lastWork = now;
+            }
+        }
 
         if (Current.RunningTimer is not { } timer)
         {
@@ -906,12 +922,16 @@ public sealed class Library : IDisposable
             _lastWork = now;
             StartTimer(other);
         }
-        else if ((now - _lastWork).TotalSeconds > Settings.IdleGap * 60.0)
+        else if ((!open.Contains(timer.ProjectKey) && !unknown) || (now - _lastWork).TotalSeconds > Settings.IdleGap * 60.0)
         {
+            // Every Claude Code of the project closed, or it has been quiet for the idle gap:
+            // the timer ends when the work last did.
             _followedProject = null;
             StopTimer(_lastWork);
         }
     }
+
+    private bool _followChecked;
 
     // MARK: Opening
 

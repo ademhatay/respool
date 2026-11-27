@@ -1466,10 +1466,23 @@ final class Library: ObservableObject {
             allSessions[id].map(\.projectKey).flatMap { hiddenProjects.contains($0) ? nil : $0 }
         }
         let working = Set(current.filter { $0.value.state == .working }.keys.compactMap(project))
+        // Projects with a Claude Code running at all, working or not. A session too new to be in
+        // the index could belong to any project, so then nothing counts as closed.
+        let open = Set(current.keys.compactMap(project))
+        let unknown = current.keys.contains { allSessions[$0] == nil }
         // The projects where a session has just set to work.
         let started = current
             .filter { $0.value.state == .working && live[$0.key]?.state != .working }
             .keys.sorted().compactMap(project)
+        // A timer running when Respool starts was most likely started by following work before
+        // a restart; it goes on being followed, so it can stop by itself.
+        if !followChecked && hasLoaded {
+            followChecked = true
+            if let timer = runningTimer, followedProject == nil {
+                followedProject = timer.projectKey
+                lastWork = now
+            }
+        }
         guard let timer = runningTimer else {
             if let key = started.first { follow(key, now: now) }
             return
@@ -1478,12 +1491,17 @@ final class Library: ObservableObject {
         guard followedProject == timer.projectKey else { return }
         if !working.contains(timer.projectKey), let key = started.first(where: { $0 != timer.projectKey }) {
             follow(key, now: now)
-        } else if let lastWork, now.timeIntervalSince(lastWork) > TimeInterval(idleGapMinutes * 60) {
-            // The time since the work stopped was not work, so the stretch ends where it did.
+        } else if let lastWork,
+                  (!open.contains(timer.projectKey) && !unknown)
+                    || now.timeIntervalSince(lastWork) > TimeInterval(idleGapMinutes * 60) {
+            // Every Claude Code of the project closed, or it has been quiet for the idle gap. The
+            // time since the work stopped was not work, so the stretch ends where it did.
             followedProject = nil
             stopTimer(at: lastWork)
         }
     }
+
+    private var followChecked = false
 
     private func follow(_ key: String, now: Date) {
         followedProject = key
