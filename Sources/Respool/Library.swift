@@ -771,10 +771,17 @@ final class Library: ObservableObject {
         isRefreshing = true
         indexQueue.async { [weak self] in
             guard let self else { return }
-            self.runIndex { done, total in
+            var lastShown = Date.distantPast
+            self.runIndex(progress: { done, total in
                 guard done % 4 == 0 || done == total else { return }
                 DispatchQueue.main.async { self.indexing = IndexProgress(done: done, total: total) }
-            }
+            }, written: {
+                // The list fills in as transcripts are saved, the newest first, rather than
+                // waiting for the whole index.
+                guard Date().timeIntervalSince(lastShown) > 1 else { return }
+                lastShown = Date()
+                DispatchQueue.main.async { self.reload() }
+            })
             DispatchQueue.main.async {
                 self.indexing = nil
                 self.isRefreshing = false
@@ -784,8 +791,9 @@ final class Library: ObservableObject {
     }
 
     @discardableResult
-    func runIndex(progress: ((Int, Int) -> Void)? = nil) -> IndexStats {
-        let stats = Indexer(db: indexDB).run(progress: progress)
+    func runIndex(progress: ((Int, Int) -> Void)? = nil, written: (() -> Void)? = nil) -> IndexStats {
+        let stats = Indexer(db: indexDB).run(progress: progress, written: written)
+        // Sessions saved before this point are grouped by folder name until their folders are resolved.
         ProjectResolver.refresh(db: indexDB)
         return stats
     }

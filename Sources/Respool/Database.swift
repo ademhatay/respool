@@ -250,7 +250,13 @@ extension Schema {
 enum Paths {
     static let home = FileManager.default.homeDirectoryForCurrentUser
 
-    static let transcripts = home.appendingPathComponent(".claude/projects", isDirectory: true)
+    /// `RESPOOL_TRANSCRIPTS` points the indexer elsewhere, which the self-test uses.
+    static var transcripts: URL {
+        if let other = ProcessInfo.processInfo.environment["RESPOOL_TRANSCRIPTS"] {
+            return URL(fileURLWithPath: other, isDirectory: true)
+        }
+        return home.appendingPathComponent(".claude/projects", isDirectory: true)
+    }
 
     static let support: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

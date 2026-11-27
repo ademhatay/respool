@@ -160,6 +160,8 @@ against Claude Code 2.1.332. The index, pins, tasks, tags, notes and timer entri
   opened there. Respool says so; switch organization in the Claude app first.
 - Token counts cover the main conversation, not subagents.
 - Lines longer than 512 KB in a transcript are skipped by the indexer.
+- If `~/.claude/projects` cannot be read, for example because it lives on an external disk that
+  is not mounted, the index is left as it is and catches up once the folder is back.
 - The deletion warning reads `cleanupPeriodDays` from `~/.claude/settings.json`. A value set by
   an organization's managed settings is not visible to Respool, which then assumes 30 days.
 

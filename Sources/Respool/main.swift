@@ -614,6 +614,23 @@ if arguments.contains("--selftest") {
             library.closeOutline()
         }
 
+        // A transcripts folder that cannot be reached, such as an external disk that is not
+        // mounted, must not empty the index.
+        let before = library.sessionCount
+        setenv("RESPOOL_TRANSCRIPTS", "/Volumes/respool-missing-disk/projects", 1)
+        let away = library.runIndex()
+        library.reloadSync()
+        check("an unreachable transcripts folder leaves the index as it is",
+              away.unreachable && away.removed == 0 && library.sessionCount == before)
+        let empty = FileManager.default.temporaryDirectory.appendingPathComponent("respool-empty-\(getpid())")
+        try? FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        setenv("RESPOOL_TRANSCRIPTS", empty.path, 1)
+        let hollow = library.runIndex()
+        library.reloadSync()
+        check("an empty transcripts folder removes nothing either", hollow.removed == 0 && library.sessionCount == before)
+        unsetenv("RESPOOL_TRANSCRIPTS")
+        try? FileManager.default.removeItem(at: empty)
+
         // Sessions that want the user.
         if let probe = library.recent.first {
             library.finishThreshold = 0

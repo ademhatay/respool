@@ -78,8 +78,18 @@ enum ProjectResolver {
         try? db.query("SELECT DISTINCT cwd FROM sessions WHERE cwd IS NOT NULL") { row in
             if let cwd = row.text(0) { folders.append(cwd) }
         }
-        for cwd in folders where cached[cwd] != true {
-            let identity = resolve(cwd: cwd)
+        // Each folder may cost two runs of git, so they are asked about side by side.
+        let unresolved = folders.filter { cached[$0] != true }
+        var identities = [ProjectIdentity?](repeating: nil, count: unresolved.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: unresolved.count) { index in
+            let identity = resolve(cwd: unresolved[index])
+            lock.lock()
+            identities[index] = identity
+            lock.unlock()
+        }
+        for (cwd, identity) in zip(unresolved, identities) {
+            guard let identity else { continue }
             _ = try? db.run(
                 "INSERT OR REPLACE INTO cwd_projects(cwd, key, name, durable) VALUES(?, ?, ?, ?)",
                 [cwd, identity.key, identity.name, identity.durable]
