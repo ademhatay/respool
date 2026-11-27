@@ -301,6 +301,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             library.captureShortcut(event)
             return nil
         }
+        if Self.performEditCommand(for: event) { return nil }
         switch Int(event.keyCode) {
         case 53: // escape
             if library.handleEscape() { hide() }
@@ -317,6 +318,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         default:
             return event
         }
+    }
+
+    /// Select all, copy, cut, paste, undo and redo. An app without a menu bar has no Edit menu
+    /// to give text fields these shortcuts, so they are sent to the field by hand.
+    static func performEditCommand(for event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags == .command || flags == [.command, .shift] else { return false }
+        let action: Selector
+        switch (event.charactersIgnoringModifiers?.lowercased(), flags.contains(.shift)) {
+        case ("a", false): action = #selector(NSText.selectAll(_:))
+        case ("c", false): action = #selector(NSText.copy(_:))
+        case ("x", false): action = #selector(NSText.cut(_:))
+        case ("v", false): action = #selector(NSText.paste(_:))
+        case ("z", false): action = Selector(("undo:"))
+        case ("z", true): action = Selector(("redo:"))
+        default: return false
+        }
+        return NSApp.sendAction(action, to: nil, from: nil)
     }
 
     static func roundedMask(radius: CGFloat) -> NSImage {

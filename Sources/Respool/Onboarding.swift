@@ -75,6 +75,7 @@ final class OnboardingController: NSObject {
                 self.library.captureShortcut(event)
                 return nil
             }
+            if PanelController.performEditCommand(for: event) { return nil }
             if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 {
                 self.close()
                 return nil
