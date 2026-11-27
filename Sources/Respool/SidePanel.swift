@@ -302,6 +302,7 @@ final class PanelController: NSObject, NSWindowDelegate {
             return nil
         }
         if Self.performEditCommand(for: event) { return nil }
+        if performPanelCommand(for: event) { return nil }
         switch Int(event.keyCode) {
         case 53: // escape
             if library.handleEscape() { hide() }
@@ -317,6 +318,24 @@ final class PanelController: NSObject, NSWindowDelegate {
             return event
         default:
             return event
+        }
+    }
+
+    /// The panel's own shortcuts: ⌘1 to ⌘9 open a pinned session, ⌘, opens Settings, ⌘P pins
+    /// the selected session and ⌘↩ shows its prompts.
+    private func performPanelCommand(for event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return false }
+        if event.keyCode == 36 || event.keyCode == 76 { return library.showOutlineOfSelection() }
+        guard let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        switch key {
+        case ",":
+            library.showingSettings = true
+            return true
+        case "p":
+            return library.togglePinOfSelection()
+        default:
+            guard let digit = Int(key), (1...9).contains(digit) else { return false }
+            return library.openPinned(at: digit)
         }
     }
 

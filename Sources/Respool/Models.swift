@@ -197,6 +197,8 @@ struct SearchHit: Identifiable, Hashable {
     var session: SessionRecord
     /// Snippet text with match ranges, or nil when only the title matched.
     var snippet: Snippet?
+    /// Which message matched, as its row in the index, so the outline can open on it.
+    var matchRow: Int?
 
     var id: String { session.id }
 }
@@ -248,6 +250,8 @@ struct OutlineEntry: Identifiable, Hashable {
 struct SessionOutline: Hashable {
     var session: SessionRecord
     var entries: [OutlineEntry]
+    /// The prompt to open on and mark: the one a search matched, or that led to the match.
+    var focus: Int?
 }
 
 /// A line jotted down from anywhere, to be dealt with later.

@@ -574,6 +574,46 @@ if arguments.contains("--selftest") {
         check("only installed apps are offered for opening",
               library.openMethods.contains(.automatic) && library.openMethods.contains(.terminal))
 
+        // The timer that follows the work.
+        if let worker = library.recent.first(where: { !library.isInOtherOrganization($0.id) }) {
+            let busy = LiveSession(pid: 1, state: .working, waitingFor: nil, desktopID: nil)
+            let quiet = LiveSession(pid: 1, state: .idle, waitingFor: nil, desktopID: nil)
+            let start = Date()
+            // Every reload reads the running sessions again, so they are replaced for this part.
+            func read(_ state: LiveSession, after seconds: TimeInterval = 0) {
+                LiveSessions.standIn = [worker.id: state]
+                library.ingestLive([worker.id: state], now: start.addingTimeInterval(seconds))
+                settle()
+            }
+            read(quiet); read(busy)
+            check("the timer stays off unless following work was asked for", library.runningTimer == nil)
+            library.startsTimerAutomatically = true
+            read(quiet); read(busy)
+            check("a session setting to work starts its project's timer", library.isTiming(worker.projectKey))
+            read(quiet, after: 60)
+            check("a short silence leaves the timer running", library.isTiming(worker.projectKey))
+            read(quiet, after: 60 + Double(library.idleGapMinutes) * 60 + 5)
+            check("a silence longer than the idle gap stops it", library.runningTimer == nil)
+            library.startsTimerAutomatically = false
+            LiveSessions.standIn = nil
+            library.ingestLive([:]); settle()
+            try index.exec("DELETE FROM time_entries; DELETE FROM session_hosts"); library.reloadSync()
+        }
+
+        // The outline opens on the prompt a search matched.
+        if let asked = library.recent.first(where: { $0.messageCount > 2 }) {
+            library.showOutlineSync(for: asked)
+            if let entries = library.outline?.entries, entries.count > 2 {
+                let target = entries[entries.count / 2]
+                library.showOutlineSync(for: asked, near: target.id)
+                check("the outline opens on the matching prompt", library.outline?.focus == target.id)
+                library.showOutlineSync(for: asked, near: target.id + 1)
+                check("a match in an answer leads to the prompt before it",
+                      library.outline?.focus == entries.last { $0.id <= target.id + 1 }?.id)
+            }
+            library.closeOutline()
+        }
+
         // Sessions that want the user.
         if let probe = library.recent.first {
             library.finishThreshold = 0

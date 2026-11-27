@@ -25,7 +25,7 @@ The screenshots show made-up data.
 ## What it does
 
 - **Search.** Searches session titles and the conversations themselves, and shows an excerpt
-  of the match.
+  of the match. The button on a result opens that session's prompts at the one that matched.
 - **Projects.** Groups sessions by git remote, so one repository checked out in several
   folders shows up as one project. Projects can be merged and renamed by hand. The menu beside
   the list's title sorts them by last activity, name, session count or token use, and leaves
@@ -50,7 +50,9 @@ The screenshots show made-up data.
   each day. Time comes from two sources, and a minute found in both is counted once:
   a timer you start and stop on a project (it shows in the menu bar while it runs, and stops
   when the Mac sleeps), and automatic time worked out from when prompts were typed and
-  answered. Moments closer together than the idle gap (15 minutes unless you change it) count
+  answered. The timer can also start by itself (off unless you turn it on in Settings): it
+  starts for a project when one of its sessions sets to work, moves when another project's
+  does, and stops once the project has been quiet for the idle gap. Moments closer together than the idle gap (15 minutes unless you change it) count
   as one stretch of work. Automatic time measures time with Claude Code, not time spent in
   meetings or editing by hand; it can be turned off in Settings. On the charts the timer's part
   is drawn solid and the automatic part lighter.
@@ -100,6 +102,10 @@ The screenshots show made-up data.
 | `⌥⇧N` | Open the panel on the note field |
 | `↑` `↓` | Move through sessions |
 | `↩` | Open the selected session |
+| `⌘↩` | Show the selected session's prompts; from a search result, at the prompt that matched |
+| `⌘1`–`⌘9` | Open the pinned session at that position |
+| `⌘P` | Pin or unpin the selected session |
+| `⌘,` | Open Settings |
 | `esc` | Clear the search, then close the panel |
 
 Hover a session for the pin button; everything else is in its context menu.

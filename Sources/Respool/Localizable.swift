@@ -474,6 +474,8 @@ enum L10n {
         tr("\(Format.count(chats)) sohbet · \(Format.count(projects)) proje bulundu", "Found \(Format.count(chats)) chats in \(Format.count(projects)) projects")
     }
     static var staysOpen: String { tr("Paneli açık tut", "Keep the panel open") }
+    static var goToMatch: String { tr("Eşleşen isteme git", "Go to the matching prompt") }
+    static var followWork: String { tr("Sayacı kendiliğinden başlat", "Start the timer automatically") }
     static var themeTitle: String { tr("Tema", "Theme") }
     static var themeLight: String { tr("Açık", "Light") }
     static var themeDark: String { tr("Koyu", "Dark") }

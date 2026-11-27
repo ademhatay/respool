@@ -33,7 +33,11 @@ struct LiveSession: Hashable {
 enum LiveSessions {
     private static let folder = Paths.home.appendingPathComponent(".claude/sessions", isDirectory: true)
 
+    /// Set by the self-test, which must not be disturbed by the sessions really running.
+    static var standIn: [String: LiveSession]?
+
     static func load() -> [String: LiveSession] {
+        if let standIn { return standIn }
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         var live: [String: LiveSession] = [:]
         for file in files where file.pathExtension == "json" {

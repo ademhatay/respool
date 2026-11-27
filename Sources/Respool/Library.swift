@@ -193,6 +193,15 @@ final class Library: ObservableObject {
         }
     }
     static let idleGapChoices = [5, 10, 15, 30]
+    /// Starts the timer for a project when one of its sessions sets to work, and stops it
+    /// when the project has been quiet for the idle gap. Off unless asked for.
+    @Published var startsTimerAutomatically: Bool {
+        didSet { UserDefaults.standard.set(startsTimerAutomatically, forKey: "startsTimerAutomatically") }
+    }
+    /// The project the timer was last started for without being asked. A timer started by
+    /// hand for another project is left alone.
+    private var followedProject: String?
+    private var lastWork: Date?
     /// Where sessions open, unless their project says otherwise.
     @Published var openMethod: OpenMethod {
         didSet { UserDefaults.standard.set(openMethod.rawValue, forKey: "openMethod") }
@@ -278,6 +287,7 @@ final class Library: ObservableObject {
         timePeriod = TimePeriod(rawValue: UserDefaults.standard.integer(forKey: "timePeriod")) ?? .today
         showsTime = UserDefaults.standard.object(forKey: "showsTime") as? Bool ?? true
         tracksTimeAutomatically = UserDefaults.standard.object(forKey: "tracksTimeAutomatically") as? Bool ?? true
+        startsTimerAutomatically = UserDefaults.standard.bool(forKey: "startsTimerAutomatically")
         let gap = UserDefaults.standard.integer(forKey: "idleGapMinutes")
         idleGapMinutes = Self.idleGapChoices.contains(gap) ? gap : 15
         openMethod = UserDefaults.standard.string(forKey: "openMethod").flatMap(OpenMethod.init) ?? .automatic
@@ -820,17 +830,20 @@ final class Library: ObservableObject {
         guard let match = Self.ftsQuery(text) else { return hits }
         try? readDB.query(
             """
-            SELECT session_id, snippet(messages, 0, char(2), char(3), '…', 14)
+            SELECT session_id, snippet(messages, 0, char(2), char(3), '…', 14), rowid
             FROM messages WHERE messages MATCH ? ORDER BY rank LIMIT 400
             """,
             [match]
         ) { row in
             guard let id = row.text(0), let raw = row.text(1), let session = sessions[id] else { return }
             if let position = positions[id] {
-                if hits[position].snippet == nil { hits[position].snippet = Self.parseSnippet(raw) }
+                if hits[position].snippet == nil {
+                    hits[position].snippet = Self.parseSnippet(raw)
+                    hits[position].matchRow = row.int(2)
+                }
             } else if hits.count < 60 {
                 positions[id] = hits.count
-                hits.append(SearchHit(session: session, snippet: Self.parseSnippet(raw)))
+                hits.append(SearchHit(session: session, snippet: Self.parseSnippet(raw), matchRow: row.int(2)))
             }
         }
         return hits
@@ -1186,17 +1199,38 @@ final class Library: ObservableObject {
     // MARK: - Outline
 
     /// Opens the list of everything the user asked in a session.
-    func showOutline(for session: SessionRecord) {
+    /// With `row`, the outline opens on the prompt that message belongs to.
+    func showOutline(for session: SessionRecord, near row: Int? = nil) {
         hover = nil
         readQueue.async { [weak self] in
             guard let self else { return }
-            let outline = self.loadOutline(for: session)
+            let outline = self.loadOutline(for: session, near: row)
             DispatchQueue.main.async { self.outline = outline }
         }
     }
 
-    func showOutlineSync(for session: SessionRecord) {
-        outline = loadOutline(for: session)
+    func showOutlineSync(for session: SessionRecord, near row: Int? = nil) {
+        outline = loadOutline(for: session, near: row)
+    }
+
+    /// The outline of the selected session, opened on the match when it is a search result.
+    func showOutlineOfSelection() -> Bool {
+        guard let selection, let session = allSessions[RowKey.sessionID(selection)] else { return false }
+        showOutline(for: session, near: results?.first { $0.id == session.id }?.matchRow)
+        return true
+    }
+
+    /// Opens the pinned session at a position, counted from one.
+    func openPinned(at position: Int) -> Bool {
+        guard results == nil, pinned.indices.contains(position - 1) else { return false }
+        open(pinned[position - 1].session)
+        return true
+    }
+
+    func togglePinOfSelection() -> Bool {
+        guard let selection, let session = allSessions[RowKey.sessionID(selection)] else { return false }
+        togglePin(session)
+        return true
     }
 
     func closeOutline() {
@@ -1204,7 +1238,7 @@ final class Library: ObservableObject {
         focusRequest += 1
     }
 
-    private func loadOutline(for session: SessionRecord) -> SessionOutline {
+    private func loadOutline(for session: SessionRecord, near row: Int? = nil) -> SessionOutline {
         var entries: [OutlineEntry] = []
         try? readDB.query(
             "SELECT rowid, text, ts FROM messages WHERE session_id = ? AND role = 'u' ORDER BY rowid",
@@ -1213,7 +1247,9 @@ final class Library: ObservableObject {
             guard let text = row.text(1) else { return }
             entries.append(OutlineEntry(id: row.int(0), text: Self.outlineText(text), date: row.date(2)))
         }
-        return SessionOutline(session: session, entries: entries)
+        // A match in an answer belongs to the prompt before it.
+        let focus = row.flatMap { row in entries.last { $0.id <= row }?.id ?? entries.first?.id }
+        return SessionOutline(session: session, entries: entries, focus: focus)
     }
 
     private static let pastedBlock = try! NSRegularExpression(
@@ -1250,6 +1286,7 @@ final class Library: ObservableObject {
     func ingestLive(_ current: [String: LiveSession], now: Date = Date()) {
         defer { if live != current { live = current } }
         rememberHosts(of: current, now: now)
+        followWork(in: current, now: now)
         guard hasSeenLive else {
             // The first reading is the baseline; nothing in it is news.
             hasSeenLive = true
@@ -1282,6 +1319,38 @@ final class Library: ObservableObject {
             workingSince[id] = nil
         }
         if updated != attention { attention = updated }
+    }
+
+    /// Moves the timer to where the work is, when that was asked for in Settings.
+    private func followWork(in current: [String: LiveSession], now: Date) {
+        guard startsTimerAutomatically else { return }
+        func project(_ id: String) -> String? {
+            allSessions[id].map(\.projectKey).flatMap { hiddenProjects.contains($0) ? nil : $0 }
+        }
+        let working = Set(current.filter { $0.value.state == .working }.keys.compactMap(project))
+        // The projects where a session has just set to work.
+        let started = current
+            .filter { $0.value.state == .working && live[$0.key]?.state != .working }
+            .keys.sorted().compactMap(project)
+        guard let timer = runningTimer else {
+            if let key = started.first { follow(key, now: now) }
+            return
+        }
+        if working.contains(timer.projectKey) { lastWork = now }
+        guard followedProject == timer.projectKey else { return }
+        if !working.contains(timer.projectKey), let key = started.first(where: { $0 != timer.projectKey }) {
+            follow(key, now: now)
+        } else if let lastWork, now.timeIntervalSince(lastWork) > TimeInterval(idleGapMinutes * 60) {
+            // The time since the work stopped was not work, so the stretch ends where it did.
+            followedProject = nil
+            stopTimer(at: lastWork)
+        }
+    }
+
+    private func follow(_ key: String, now: Date) {
+        followedProject = key
+        lastWork = now
+        startTimer(forProject: key)
     }
 
     /// Notes which app each running session is in, so it can be reopened there later.
@@ -1699,10 +1768,11 @@ final class Library: ObservableObject {
         }
     }
 
-    func stopTimer() {
-        guard runningTimer != nil else { return }
-        let now = Date().timeIntervalSince1970
-        write { db in try Self.closeTimers(db, at: now) }
+    /// Stops the timer. `moment` ends the stretch earlier than now, when the work ended earlier.
+    func stopTimer(at moment: Date = Date()) {
+        guard let timer = runningTimer else { return }
+        let end = max(moment, timer.started).timeIntervalSince1970
+        write { db in try Self.closeTimers(db, at: end) }
     }
 
     func toggleTimer(forProject key: String) {

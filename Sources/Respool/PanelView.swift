@@ -292,7 +292,7 @@ struct PanelView: View {
                     library: library, session: hit.session,
                     rowKey: RowKey.hit(hit.id),
                     detail: hit.snippet == nil ? hit.session.placeLabel : nil,
-                    snippet: hit.snippet, detailLines: 2
+                    snippet: hit.snippet, detailLines: 2, matchRow: hit.matchRow
                 )
             }
         }
@@ -496,6 +496,8 @@ struct SessionRow: View {
     var detailLines = 1
     var inset: CGFloat = 0
     var onAddTask: (() -> Void)?
+    /// The message a search matched in this session, for opening its prompts there.
+    var matchRow: Int?
 
     @State private var hovering = Snapshot.showsHover
 
@@ -550,8 +552,11 @@ struct SessionRow: View {
                     if let onAddTask {
                         IconButton(symbol: "plus", help: L10n.addTask, style: style, action: onAddTask)
                     }
-                    IconButton(symbol: "list.bullet", help: L10n.promptOutline, style: style) {
-                        library.showOutline(for: session)
+                    IconButton(
+                        symbol: matchRow == nil ? "list.bullet" : "text.magnifyingglass",
+                        help: matchRow == nil ? L10n.promptOutline : L10n.goToMatch, style: style
+                    ) {
+                        library.showOutline(for: session, near: matchRow)
                     }
                     IconButton(
                         symbol: pinned ? "pin.slash" : "pin",
@@ -593,7 +598,9 @@ struct SessionRow: View {
                 .disabled(live != nil && method != .desktop)
             }
         }
-        Button(L10n.promptOutline) { library.showOutline(for: session) }
+        Button(matchRow == nil ? L10n.promptOutline : L10n.goToMatch) {
+            library.showOutline(for: session, near: matchRow)
+        }
         Divider()
         Button(pinned ? L10n.unpin : L10n.pin) { library.togglePin(session) }
         Button(L10n.addTask) { library.beginTask(linkedTo: .session(id: session.id, title: session.title)) }
@@ -2404,17 +2411,25 @@ struct OutlineView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 48)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(days, id: \.title) { day in
-                            SectionHeader(title: day.title)
-                            ForEach(day.entries) { entry in
-                                OutlineRow(library: library, entry: entry)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            ForEach(days, id: \.title) { day in
+                                SectionHeader(title: day.title)
+                                ForEach(day.entries) { entry in
+                                    OutlineRow(library: library, entry: entry, marked: entry.id == outline.focus)
+                                        .id(entry.id)
+                                }
                             }
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 12)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 12)
+                    .onAppear {
+                        guard let focus = outline.focus else { return }
+                        // After the first layout, when the list knows where its rows are.
+                        DispatchQueue.main.async { proxy.scrollTo(focus, anchor: .center) }
+                    }
                 }
             }
         }
@@ -2471,6 +2486,8 @@ struct OutlineView: View {
 struct OutlineRow: View {
     @ObservedObject var library: Library
     let entry: OutlineEntry
+    /// The prompt a search led here for.
+    var marked = false
 
     @State private var hovering = false
     @State private var expanded = false
@@ -2484,14 +2501,15 @@ struct OutlineRow: View {
                 .frame(width: 34, alignment: .leading)
             Text(entry.text)
                 .font(.system(size: 12))
-                .lineLimit(expanded ? nil : 3)
+                .lineLimit(expanded || marked ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(hovering ? 0.07 : 0))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(marked ? Color.accentColor.opacity(0.16) : Color.primary.opacity(hovering ? 0.07 : 0))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
@@ -2632,6 +2650,12 @@ struct SettingsView: View {
                         VStack(spacing: 0) {
                             SettingsRow(title: L10n.showTime) {
                                 Toggle("", isOn: $library.showsTime)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                            }
+                            SettingsRow(title: L10n.followWork) {
+                                Toggle("", isOn: $library.startsTimerAutomatically)
                                     .labelsHidden()
                                     .toggleStyle(.switch)
                                     .controlSize(.small)
