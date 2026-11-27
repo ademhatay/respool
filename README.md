@@ -61,7 +61,7 @@ The screenshots show made-up data.
 - **Deletion warning.** Claude Code deletes the transcript of a terminal session it has not
   written to for 30 days (`cleanupPeriodDays` in its settings); sessions the desktop app keeps
   are exempt. In a session's last week Respool marks its row and shows a bar at the top of the
-  panel that copies all such transcripts into a `Backups` folder beside the index. Any session
+  panel that names those sessions with the days each has left (a click opens one) and copies all such transcripts into a `Backups` folder beside the index. Any session
   can also be backed up from its context menu, and a session with a copy says so instead of
   warning. The copies are the transcripts themselves; Respool keeps them and reads nothing
   from them.
@@ -108,6 +108,10 @@ The panel opens from the right edge by default; Settings can move it to the left
 bottom. Or drag it by the margin around the search field or by the footer, and resize it from
 its edges: it then stays where you put it, at the size you gave it, until you pick an edge
 again. Settings also has the theme (system, light or dark) and the language.
+
+The panel closes when you click elsewhere. "Keep the panel open", in Settings and in the panel's
+menu, leaves it on screen instead, for a panel parked on a second display; it then closes
+with its shortcut or `esc`.
 
 The first time it starts, Respool shows a welcome screen in the middle of the display with the
 shortcut, the panel's position, where chats open and whether to start at login. Settings can

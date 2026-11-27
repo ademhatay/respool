@@ -116,7 +116,11 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func show() {
-        guard !isShown else { return }
+        guard !isShown else {
+            // Kept open and clicked away from: asking for it again gives it the keyboard back.
+            panel.makeKey()
+            return
+        }
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
         let edge = library.panelEdge
@@ -274,7 +278,21 @@ final class PanelController: NSObject, NSWindowDelegate {
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        hide()
+        if library.staysOpen {
+            library.hover = nil
+        } else {
+            hide()
+        }
+    }
+
+    /// Gets out of the way after the panel has done what was asked of it, unless it is kept open.
+    func dismiss() {
+        if !library.staysOpen { hide() }
+    }
+
+    /// Comes back after a failure the user should see.
+    func present() {
+        if isShown { panel.makeKey() } else { show() }
     }
 
     private func handle(_ event: NSEvent) -> NSEvent? {

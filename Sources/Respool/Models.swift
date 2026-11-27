@@ -472,10 +472,11 @@ enum Format {
         return String(format: "%d:%02d:%02d", whole / 3600, whole / 60 % 60, whole % 60)
     }
 
-    /// Hours and minutes for a narrow place, such as 1:24.
+    /// A running clock for a narrow place: minutes and seconds, with the hours once there are any.
     static func shortClock(_ seconds: TimeInterval) -> String {
-        let minutes = max(Int(seconds), 0) / 60
-        return String(format: "%d:%02d", minutes / 60, minutes % 60)
+        let whole = max(Int(seconds), 0)
+        if whole < 3600 { return String(format: "%d:%02d", whole / 60, whole % 60) }
+        return clock(seconds)
     }
 
     /// A length of work in hours and minutes, however long: 26 sa 10 dk rather than a day.

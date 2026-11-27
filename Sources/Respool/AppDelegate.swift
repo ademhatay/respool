@@ -36,13 +36,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 library.show(notice: Self.otherOrganizationNotice(for: session))
                 return
             }
-            controller?.hide()
+            controller?.dismiss()
             Opener.open(
                 session, method: method, live: library.live[session.id], desktopID: library.desktopID(for: session.id)
             ) { outcome in
                 switch outcome {
                 case .failed:
-                    controller?.show()
+                    controller?.present()
                     library.show(notice: L10n.chatFailed)
                 case .openedInEditor:
                     self?.announceCopiedCommand(for: session.title)
@@ -61,17 +61,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 library.show(notice: Self.otherOrganizationNotice(for: session))
                 return
             }
-            controller?.hide()
+            controller?.dismiss()
             Opener.openInDesktop(session, desktopID: library.desktopID(for: session.id)) { outcome in
                 guard outcome == .failed else { return }
-                controller?.show()
+                controller?.present()
                 library.show(notice: L10n.chatFailedInClaude)
             }
         }
         library.onStartSession = { [weak self, weak controller, weak library] folder, prompt, method in
-            controller?.hide()
+            controller?.dismiss()
             guard Opener.startSession(in: folder, prompt: prompt, method: method) else {
-                controller?.show()
+                controller?.present()
                 library?.show(notice: L10n.sessionFailed)
                 return
             }
@@ -134,9 +134,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateStatusTitle() }
             .store(in: &observers)
-        clock = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            self?.updateStatusTitle()
+        // Once a second, so the menu bar shows the timer moving. Idle unless a timer is running;
+        // in the common modes, so it keeps ticking while a menu is open.
+        let clock = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            if self?.library?.runningTimer != nil { self?.updateStatusTitle() }
         }
+        RunLoop.main.add(clock, forMode: .common)
+        self.clock = clock
         // A sleeping Mac is not being worked on.
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willSleepNotification, object: nil, queue: .main

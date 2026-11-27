@@ -494,7 +494,7 @@ if arguments.contains("--selftest") {
               TimeMath.length(TimeMath.merged([TimeSpan(start: 0, end: 100), TimeSpan(start: 50, end: 150), TimeSpan(start: 300, end: 310)])) == 160)
         check("a period takes only its own part of a stretch",
               TimeMath.clipped([TimeSpan(start: 0, end: 100)], from: 40, to: 70) == [TimeSpan(start: 40, end: 70)])
-        check("durations read in hours and minutes", Format.clock(3727) == "1:02:07" && Format.shortClock(5040) == "1:24")
+        check("durations read in hours and minutes", Format.clock(3727) == "1:02:07" && Format.shortClock(84) == "1:24" && Format.shortClock(3727) == "1:02:07")
         if library.allProjects.count >= 2 {
             let one = library.allProjects[0].key, other = library.allProjects[1].key
             library.startTimer(forProject: one); settle()

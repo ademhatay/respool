@@ -205,6 +205,11 @@ final class Library: ObservableObject {
     @Published var opensInTabs: Bool {
         didSet { UserDefaults.standard.set(opensInTabs, forKey: "opensInTabs") }
     }
+    /// Keeps the panel on screen when something else is clicked, for a panel parked on a
+    /// second display. It then closes only by its shortcut or Escape.
+    @Published var staysOpen: Bool {
+        didSet { UserDefaults.standard.set(staysOpen, forKey: "staysOpen") }
+    }
     /// The projects that open their sessions their own way.
     @Published private(set) var projectOpenMethods: [String: OpenMethod] = [:]
     /// The ways of opening a session that this Mac has the app for.
@@ -277,6 +282,7 @@ final class Library: ObservableObject {
         idleGapMinutes = Self.idleGapChoices.contains(gap) ? gap : 15
         openMethod = UserDefaults.standard.string(forKey: "openMethod").flatMap(OpenMethod.init) ?? .automatic
         opensInTabs = UserDefaults.standard.object(forKey: "opensInTabs") as? Bool ?? true
+        staysOpen = UserDefaults.standard.bool(forKey: "staysOpen")
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
         panelEdge = UserDefaults.standard.string(forKey: "panelEdge").flatMap(PanelEdge.init) ?? .right
         showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true

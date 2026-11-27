@@ -473,6 +473,7 @@ enum L10n {
     static func welcomeFound(_ chats: Int, _ projects: Int) -> String {
         tr("\(Format.count(chats)) sohbet · \(Format.count(projects)) proje bulundu", "Found \(Format.count(chats)) chats in \(Format.count(projects)) projects")
     }
+    static var staysOpen: String { tr("Paneli açık tut", "Keep the panel open") }
     static var themeTitle: String { tr("Tema", "Theme") }
     static var themeLight: String { tr("Açık", "Light") }
     static var themeDark: String { tr("Koyu", "Dark") }

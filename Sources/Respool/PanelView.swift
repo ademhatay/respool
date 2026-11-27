@@ -83,6 +83,7 @@ struct PanelView: View {
             Menu {
                 Button(L10n.refresh) { library.refresh() }
                 Button(L10n.newTag) { library.tagEditor = TagEditor() }
+                Toggle(L10n.staysOpen, isOn: $library.staysOpen)
                 Button(L10n.settingsMenu) { library.showingSettings = true }
                 if let version = library.availableUpdate {
                     Button(L10n.updateMenu(version)) { library.showingReleaseNotes = true }
@@ -650,29 +651,97 @@ struct ExpiryMark: View {
 struct ExpiryBanner: View {
     @ObservedObject var library: Library
 
+    @State private var showsAll = false
+    private static let shown = 3
+
     var body: some View {
         let sessions = library.unbackedExpiringSessions
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.orange)
-            Text(L10n.expiringChats(sessions.count))
-                .font(.system(size: 12))
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            Button(L10n.backUp) { library.backUp(sessions) }
-                .controlSize(.small)
+        let listed = showsAll ? sessions : Array(sessions.prefix(Self.shown))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text(L10n.expiringChats(sessions.count))
+                    .font(.system(size: 12))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Button(L10n.backUp) { library.backUp(sessions) }
+                    .controlSize(.small)
+            }
+            .help(L10n.expiryHelp(Retention.days))
+            // Which sessions they are, the one with least time first. A click opens it.
+            VStack(spacing: 0) {
+                ForEach(listed) { session in
+                    ExpiringRow(library: library, session: session)
+                }
+                if sessions.count > listed.count {
+                    Button {
+                        showsAll = true
+                    } label: {
+                        Text(L10n.moreSessions(sessions.count - listed.count))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 25)
+                            .padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
         .padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.orange.opacity(0.12)))
         .padding(.horizontal, 12)
         .padding(.bottom, 4)
-        .help("""
-        Claude Code, \(Retention.days) gündür yazılmayan terminal sohbetlerinin dökümünü siler. \
-        Bir kopyası alınan sohbetler işaretlenir; kopyalar Respool'un klasöründeki Backups içinde durur.
-        """)
+    }
+}
+
+/// One session in the deletion warning: its name, its project and how long it has left.
+struct ExpiringRow: View {
+    @ObservedObject var library: Library
+    let session: SessionRecord
+
+    @State private var hovering = false
+
+    var body: some View {
+        let days = library.daysLeft(for: session) ?? 0
+        Button {
+            library.open(session)
+        } label: {
+            HStack(spacing: 6) {
+                Text(session.title)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                Text(session.projectName)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .layoutPriority(-1)
+                Spacer(minLength: 6)
+                Text(days <= 0 ? L10n.today.lowercased() : L10n.days(days))
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.leading, 19)
+            .padding(.trailing, 6)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.primary.opacity(hovering ? 0.08 : 0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button(L10n.backUpTranscript) { library.backUp([session]) }
+            Button(L10n.promptOutline) { library.showOutline(for: session) }
+        }
     }
 }
 
@@ -2498,6 +2567,14 @@ struct SettingsView: View {
                             .labelsHidden()
                             .controlSize(.small)
                             .fixedSize()
+                        }
+                    }
+                    SettingsGroup {
+                        SettingsRow(title: L10n.staysOpen) {
+                            Toggle("", isOn: $library.staysOpen)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
                         }
                     }
                     if library.openMethods.contains(.iterm) {
