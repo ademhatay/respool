@@ -223,7 +223,8 @@ final class SwitcherModel: ObservableObject {
 
 struct SwitcherView: View {
     static let width: CGFloat = 620
-    static let height: CGFloat = 470
+    /// Tall enough for nine rows under the search field and above the key hints.
+    static let height: CGFloat = 540
     static let radius: CGFloat = 16
 
     @ObservedObject var library: Library
@@ -248,6 +249,7 @@ struct SwitcherView: View {
             }
             .padding(.horizontal, 20)
             .frame(height: 60)
+            .fixedSize(horizontal: false, vertical: true)
 
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
 
@@ -257,28 +259,39 @@ struct SwitcherView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VStack(spacing: 2) {
-                    if model.query.isEmpty {
-                        Text(L10n.recentTitle)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 4)
-                            .padding(.bottom, 2)
+                // The list scrolls under a fixed search field and key hints, keeping the
+                // selected row in view.
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            if model.query.isEmpty {
+                                Text(L10n.recentTitle)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 4)
+                                    .padding(.bottom, 2)
+                            }
+                            ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                                row(item, selected: index == model.selection)
+                                    .id(index)
+                                    .onTapGesture { choose(item, []) }
+                                    .onHover { if $0 { model.selection = index } }
+                            }
+                        }
+                        .padding(8)
                     }
-                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                        row(item, selected: index == model.selection)
-                            .onTapGesture { choose(item, []) }
-                            .onHover { if $0 { model.selection = index } }
+                    .frame(maxHeight: .infinity)
+                    .onChange(of: model.selection) { _, index in
+                        proxy.scrollTo(index)
                     }
-                    Spacer(minLength: 0)
                 }
-                .padding(8)
             }
 
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
             footer
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(width: Self.width, height: Self.height)
         .overlay(
