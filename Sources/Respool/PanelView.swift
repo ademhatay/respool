@@ -2628,6 +2628,29 @@ struct SettingsView: View {
                                 .controlSize(.small)
                         }
                     }
+                    SettingsGroup {
+                        VStack(spacing: 0) {
+                            if library.openMethods.contains(where: \.isEditor) {
+                                SettingsRow(title: L10n.usesEditorTerminal) {
+                                    if library.usesEditorTerminal, !EditorTerminal.isAllowed {
+                                        Button(L10n.allow) { EditorTerminal.askForPermission() }
+                                            .controlSize(.small)
+                                            .help(L10n.needsAccessibility)
+                                    }
+                                    Toggle("", isOn: $library.usesEditorTerminal)
+                                        .labelsHidden()
+                                        .toggleStyle(.switch)
+                                        .controlSize(.small)
+                                }
+                            }
+                            SettingsRow(title: L10n.opensOtherAccounts) {
+                                Toggle("", isOn: $library.opensOtherAccountsInTerminal)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
                     if library.openMethods.contains(.iterm) {
                         SettingsGroup {
                             SettingsRow(title: L10n.opensInTabs) {

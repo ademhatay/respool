@@ -214,6 +214,18 @@ final class Library: ObservableObject {
     @Published var opensInTabs: Bool {
         didSet { UserDefaults.standard.set(opensInTabs, forKey: "opensInTabs") }
     }
+    /// Runs chats opened with an editor in the editor's own terminal rather than beside it.
+    @Published var usesEditorTerminal: Bool {
+        didSet {
+            UserDefaults.standard.set(usesEditorTerminal, forKey: "usesEditorTerminal")
+            if usesEditorTerminal, !EditorTerminal.isAllowed { EditorTerminal.askForPermission() }
+        }
+    }
+    /// A chat filed under another Claude account cannot be opened in the Claude app while it is
+    /// signed in elsewhere. On, such a chat is resumed in a terminal instead of only saying so.
+    @Published var opensOtherAccountsInTerminal: Bool {
+        didSet { UserDefaults.standard.set(opensOtherAccountsInTerminal, forKey: "opensOtherAccountsInTerminal") }
+    }
     /// Keeps the panel on screen when something else is clicked, for a panel parked on a
     /// second display. It then closes only by its shortcut or Escape.
     @Published var staysOpen: Bool {
@@ -293,6 +305,8 @@ final class Library: ObservableObject {
         openMethod = UserDefaults.standard.string(forKey: "openMethod").flatMap(OpenMethod.init) ?? .automatic
         opensInTabs = UserDefaults.standard.object(forKey: "opensInTabs") as? Bool ?? true
         staysOpen = UserDefaults.standard.bool(forKey: "staysOpen")
+        usesEditorTerminal = UserDefaults.standard.bool(forKey: "usesEditorTerminal")
+        opensOtherAccountsInTerminal = UserDefaults.standard.object(forKey: "opensOtherAccountsInTerminal") as? Bool ?? true
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
         panelEdge = UserDefaults.standard.string(forKey: "panelEdge").flatMap(PanelEdge.init) ?? .right
         showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true
@@ -954,6 +968,9 @@ final class Library: ObservableObject {
             return OpenMethod(hostBundleID: live.hostBundleID) ?? .terminal
         }
         let method = openMethod(for: session)
+        if method == .automatic || method == .desktop, isInOtherOrganization(session.id), opensOtherAccountsInTerminal {
+            return Opener.companionTerminal
+        }
         guard method == .automatic else { return method }
         return desktop.records[session.id] != nil ? .desktop : .terminal
     }

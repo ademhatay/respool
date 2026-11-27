@@ -31,10 +31,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = PanelController(library: library)
         library.onOpen = { [weak controller, weak library] session, method in
             guard let library else { return }
+            var method = method
             // A link into another organization does nothing; any other way of opening still works.
             if method == .automatic || method == .desktop, library.isInOtherOrganization(session.id) {
-                library.show(notice: Self.otherOrganizationNotice(for: session))
-                return
+                guard library.opensOtherAccountsInTerminal else {
+                    library.show(notice: Self.otherOrganizationNotice(for: session))
+                    return
+                }
+                method = Opener.companionTerminal
             }
             controller?.dismiss()
             Opener.open(
@@ -56,7 +60,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             if library.isInOtherOrganization(session.id) {
-                library.show(notice: Self.otherOrganizationNotice(for: session))
+                if library.opensOtherAccountsInTerminal {
+                    library.open(session, with: Opener.companionTerminal)
+                } else {
+                    library.show(notice: Self.otherOrganizationNotice(for: session))
+                }
                 return
             }
             controller?.dismiss()
@@ -124,6 +132,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &observers)
         library.$opensInTabs
             .sink { Opener.usesTabs = $0 }
+            .store(in: &observers)
+        library.$usesEditorTerminal
+            .sink { Opener.usesEditorTerminal = $0 }
             .store(in: &observers)
         library.$runningTimer
             .receive(on: RunLoop.main)

@@ -86,7 +86,11 @@ The screenshots show made-up data.
   whichever are installed), each project can have its own choice from its context menu, and a
   session's context menu opens it any of these ways once. An editor cannot be told to run
   a command in its own terminal, so choosing one opens the project's folder there and resumes
-  the session beside it in iTerm (or Terminal), with nothing to paste. Each session's row shows
+  the session beside it in iTerm (or Terminal), with nothing to paste. Turn on "Open in the editor's own terminal" to have it run in
+  the editor's terminal instead: Respool brings the editor forward, asks its command palette for
+  a new terminal and pastes the command there. This needs the Accessibility permission, which
+  macOS asks for once. A chat filed under another Claude account, which the Claude app cannot
+  open while it is signed in elsewhere, is resumed in a terminal; Settings can turn that off. Each session's row shows
   the icon of the app it will open in. A session that is running always
   opens where it runs. The button on a project's row starts a new session in its folder.
 - **Updates.** Settings checks GitHub for a newer release and shows the release notes. Nothing

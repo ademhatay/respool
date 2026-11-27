@@ -476,6 +476,12 @@ enum L10n {
     static var staysOpen: String { tr("Paneli açık tut", "Keep the panel open") }
     static var goToMatch: String { tr("Eşleşen isteme git", "Go to the matching prompt") }
     static var followWork: String { tr("Sayacı kendiliğinden başlat", "Start the timer automatically") }
+    static var usesEditorTerminal: String { tr("Editörün kendi terminalinde aç", "Open in the editor's own terminal") }
+    static var opensOtherAccounts: String { tr("Diğer hesaptakileri terminalde aç", "Open other accounts' chats in a terminal") }
+    static var needsAccessibility: String {
+        tr("Erişilebilirlik izni gerekiyor", "Needs the Accessibility permission")
+    }
+    static var allow: String { tr("İzin ver", "Allow") }
     static var themeTitle: String { tr("Tema", "Theme") }
     static var themeLight: String { tr("Açık", "Light") }
     static var themeDark: String { tr("Koyu", "Dark") }

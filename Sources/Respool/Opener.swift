@@ -56,10 +56,14 @@ enum Opener {
         case .terminal, .iterm:
             completion(openInTerminal(session, with: method) ? .opened : .failed)
         case .vscode, .cursor, .zed:
-            // An editor cannot be told to run a command in its own terminal, so the folder opens
-            // there and the chat resumes beside it in a terminal, with nothing to paste.
-            let opened = openFolder(workingDirectory(for: session), in: method)
-            completion(opened && openInTerminal(session, with: companionTerminal) ? .openedInEditor : .failed)
+            let folder = workingDirectory(for: session)
+            guard openFolder(folder, in: method) else {
+                completion(.failed)
+                return
+            }
+            runBesideEditor(command(cd: folder.path, "claude --resume \(session.id)"), in: method) { ran in
+                completion(ran || openInTerminal(session, with: companionTerminal) ? .openedInEditor : .failed)
+            }
         }
     }
 
@@ -76,6 +80,28 @@ enum Opener {
 
     private static func openFolder(_ folder: URL, in editor: OpenMethod) -> Bool {
         open(folder, with: editor)
+    }
+
+    /// Set from Settings: run a chat opened with an editor in the editor's own terminal.
+    static var usesEditorTerminal = false
+
+    /// Runs a command in the editor's terminal when that is chosen and allowed. Calls back with
+    /// false when it was not done, so the caller falls back to a terminal beside the editor.
+    private static func runBesideEditor(_ command: String, in editor: OpenMethod, completion: @escaping (Bool) -> Void) {
+        guard usesEditorTerminal else {
+            completion(false)
+            return
+        }
+        guard EditorTerminal.isAllowed else {
+            EditorTerminal.askForPermission()
+            completion(false)
+            return
+        }
+        EditorTerminal.run(command, in: editor, completion: completion)
+    }
+
+    private static func command(cd folder: String, _ command: String) -> String {
+        "cd '" + folder.replacingOccurrences(of: "'", with: "'\\''") + "' && " + command
     }
 
     /// The terminal a chat runs in when it is opened with an editor: iTerm when it is there.
@@ -204,6 +230,11 @@ enum Opener {
         let argument = trimmed.isEmpty ? "" : " " + quoted(trimmed)
         let editor = method.isEditor ? method : nil
         if let editor, !openFolder(URL(fileURLWithPath: folder), in: editor) { return false }
+        if let editor, usesEditorTerminal, EditorTerminal.isAllowed {
+            EditorTerminal.run(command(cd: folder, "claude" + argument), in: editor) { _ in }
+            return true
+        }
+        if editor != nil, usesEditorTerminal { EditorTerminal.askForPermission() }
         let script = """
         #!/bin/zsh -l
         cd \(quoted(folder))
