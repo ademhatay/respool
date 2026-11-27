@@ -125,6 +125,11 @@ public partial class App : Application, IAppHost
             menu.Items.Add(new Forms.ToolStripSeparator());
             menu.Items.Add(L.Quit, null, (_, _) => Quit());
         };
+        menu.Opening += (_, _) => menu.Renderer = new TrayMenuRenderer(Theme);
+        menu.ShowImageMargin = false;
+        menu.ShowCheckMargin = true;
+        menu.Padding = new Forms.Padding(4);
+        menu.Font = new System.Drawing.Font("Segoe UI", 9f);
         _tray = new Forms.NotifyIcon { Icon = TrayIcon(), Text = "Respool", Visible = true, ContextMenuStrip = menu };
         _tray.MouseClick += (_, args) =>
         {

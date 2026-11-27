@@ -442,47 +442,78 @@ public sealed class SettingsPage
     {
         var order = Settings.SectionOrder;
         var rows = new List<UIElement?>();
-        for (var index = 0; index < order.Count; index++)
+        foreach (var section in order)
         {
-            var section = order[index];
-            var at = index;
             var shown = IsShown(section);
+            var grip = Ui.Icon("", 12, Ui.T.Tertiary);
+            grip.Width = 16;
             var name = Ui.Label(PanelSection.Title(section), 13, shown ? Ui.T.Text : Ui.T.Tertiary);
-            var up = MoveButton(Theme.Glyph.ChevronUp, at > 0, () => Move(at, -1));
-            var down = MoveButton(Theme.Glyph.ChevronDown, at < order.Count - 1, () => Move(at, 1));
             var toggle = Ui.Switch(shown, on => Change(settings => SetShown(settings, section, on), reload: false));
             toggle.Margin = new Thickness(4, 0, 0, 0);
-            var row = Ui.Row(new UIElement?[] { name }, null, new UIElement?[] { up, down, toggle }, 2);
-            row.MinHeight = 36;
-            row.Margin = new Thickness(12, 0, 12, 0);
-            rows.Add(row);
+            var content = Ui.Row(new UIElement?[] { grip, name }, null, new UIElement?[] { toggle }, 8);
+            content.MinHeight = 36;
+            rows.Add(DraggableSection(section, content));
         }
         rows.Add(Row(L.CompactRows, Ui.Switch(Settings.Compact, on => Change(settings => settings.Compact = on, reload: false))));
         return Group(rows.ToArray());
     }
 
-    private static FrameworkElement MoveButton(string glyph, bool enabled, Action move)
-    {
-        if (!enabled)
-        {
-            var icon = Ui.Icon(glyph, 10, Ui.T.Secondary);
-            icon.FontWeight = FontWeights.SemiBold;
-            return new Border { Width = 22, Height = 22, Child = icon, Opacity = 0.3 };
-        }
-        var button = Ui.IconButton(glyph, move, null, 10, Ui.T.Secondary, 22, 22);
-        if (button.Child is TextBlock text) text.FontWeight = FontWeights.SemiBold;
-        return button;
-    }
+    private const string SectionDrag = "Respool.Section";
 
-    private void Move(int index, int step)
+    /// <summary>
+    /// A section's row that is dragged into a new place: dropped on the upper half of another
+    /// row it goes before it, on the lower half after it. A line shows where it will land.
+    /// </summary>
+    private FrameworkElement DraggableSection(string section, FrameworkElement content)
     {
-        var target = index + step;
-        Change(settings =>
+        var row = new Border
         {
-            var order = settings.SectionOrder;
-            if (target < 0 || target >= order.Count) return;
-            (order[index], order[target]) = (order[target], order[index]);
-        }, reload: false);
+            Child = content,
+            Padding = new Thickness(12, 0, 12, 0),
+            Background = Brushes.Transparent,
+            BorderBrush = Ui.T.Accent,
+            BorderThickness = new Thickness(0),
+            Cursor = Cursors.SizeAll,
+            AllowDrop = true,
+        };
+        var start = (Point?)null;
+        row.PreviewMouseLeftButtonDown += (_, e) => start = e.GetPosition(row);
+        row.PreviewMouseLeftButtonUp += (_, _) => start = null;
+        row.MouseMove += (_, e) =>
+        {
+            if (start is not { } from || e.LeftButton != MouseButtonState.Pressed) return;
+            if ((e.GetPosition(row) - from).Length < 4) return;
+            start = null;
+            row.Opacity = 0.45;
+            DragDrop.DoDragDrop(row, new DataObject(SectionDrag, section), DragDropEffects.Move);
+            row.Opacity = 1;
+        };
+        bool Accepts(DragEventArgs e) => e.Data.GetData(SectionDrag) is string moved && moved != section;
+        bool After(DragEventArgs e) => e.GetPosition(row).Y > row.ActualHeight / 2;
+        row.DragOver += (_, e) =>
+        {
+            var ok = Accepts(e);
+            e.Effects = ok ? DragDropEffects.Move : DragDropEffects.None;
+            row.BorderThickness = ok ? (After(e) ? new Thickness(0, 0, 0, 2) : new Thickness(0, 2, 0, 0)) : new Thickness(0);
+            e.Handled = true;
+        };
+        row.DragLeave += (_, _) => row.BorderThickness = new Thickness(0);
+        row.Drop += (_, e) =>
+        {
+            row.BorderThickness = new Thickness(0);
+            if (!Accepts(e) || e.Data.GetData(SectionDrag) is not string moved) return;
+            var after = After(e);
+            e.Handled = true;
+            Change(settings =>
+            {
+                var order = settings.SectionOrder;
+                order.Remove(moved);
+                var index = order.IndexOf(section);
+                if (index < 0) { order.Add(moved); return; }
+                order.Insert(after ? index + 1 : index, moved);
+            }, reload: false);
+        };
+        return row;
     }
 
     // MARK: Version
