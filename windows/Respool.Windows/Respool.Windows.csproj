@@ -16,9 +16,18 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>Respool</AssemblyName>
     <RootNamespace>Respool.Windows</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.17.1</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Runs on a newer .NET too when 8 is not installed. -->
+    <RollForward>Major</RollForward>
+    <!-- The macOS app's icon (docs/icon.png) at the sizes Windows asks for. -->
+    <ApplicationIcon>Respool.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The tray icon is read from here at the size the notification area wants. -->
+    <EmbeddedResource Include="Respool.ico" LogicalName="Respool.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Respool.Core\Respool.Core.csproj" />
