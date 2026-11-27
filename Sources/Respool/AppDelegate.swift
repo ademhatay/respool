@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let controller = PanelController(library: library)
-        library.onOpen = { [weak self, weak controller, weak library] session, method in
+        library.onOpen = { [weak controller, weak library] session, method in
             guard let library else { return }
             // A link into another organization does nothing; any other way of opening still works.
             if method == .automatic || method == .desktop, library.isInOtherOrganization(session.id) {
@@ -44,9 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .failed:
                     controller?.present()
                     library.show(notice: L10n.chatFailed)
-                case .openedInEditor:
-                    self?.announceCopiedCommand(for: session.title)
-                case .opened, .alreadyInTerminal:
+                case .opened, .alreadyInTerminal, .openedInEditor:
                     break
                 }
             }
@@ -68,15 +66,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 library.show(notice: L10n.chatFailedInClaude)
             }
         }
-        library.onStartSession = { [weak self, weak controller, weak library] folder, prompt, method in
+        library.onStartSession = { [weak controller, weak library] folder, prompt, method in
             controller?.dismiss()
             guard Opener.startSession(in: folder, prompt: prompt, method: method) else {
                 controller?.present()
                 library?.show(notice: L10n.sessionFailed)
                 return
-            }
-            if method.isEditor {
-                self?.announceCopiedCommand(for: URL(fileURLWithPath: folder).lastPathComponent)
             }
         }
         self.library = library
@@ -206,14 +201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.imagePosition = parts.isEmpty ? .imageOnly : .imageLeading
         button.title = parts.isEmpty ? "" : " " + parts.joined(separator: " · ")
         button.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-    }
-
-    /// An editor has no way to be handed a command, so it is left on the clipboard and said so.
-    private func announceCopiedCommand(for title: String) {
-        library?.show(notice: L10n.commandCopied)
-        if library?.notificationsEnabled == true {
-            notifier?.post(sessionID: "command-copied", title: title, body: L10n.commandCopied)
-        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

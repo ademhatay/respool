@@ -947,6 +947,17 @@ final class Library: ObservableObject {
         onOpen?(session, method ?? openMethod(for: session))
     }
 
+    /// Where a session will actually open, with the automatic way worked out, for its row's icon.
+    func destination(of session: SessionRecord) -> OpenMethod {
+        if let live = live[session.id] {
+            if live.desktopID != nil { return .desktop }
+            return OpenMethod(hostBundleID: live.hostBundleID) ?? .terminal
+        }
+        let method = openMethod(for: session)
+        guard method == .automatic else { return method }
+        return desktop.records[session.id] != nil ? .desktop : .terminal
+    }
+
     /// The way a project's sessions open: its own choice, or the one from Settings.
     func openMethod(forProject key: String) -> OpenMethod {
         let method = projectOpenMethods[key] ?? openMethod

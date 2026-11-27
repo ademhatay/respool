@@ -507,6 +507,8 @@ struct SessionRow: View {
         let live = library.live[session.id]
 
         HStack(alignment: .top, spacing: 8) {
+            AppMark(method: library.destination(of: session))
+                .padding(.top, 1)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(session.title)
@@ -1923,6 +1925,37 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ view: Handle, context: Context) {}
 }
 
+/// The icon of the app a session will open in: the Claude app, a terminal or an editor.
+struct AppMark: View {
+    let method: OpenMethod
+
+    private static var cache: [OpenMethod: NSImage] = [:]
+
+    var body: some View {
+        Group {
+            if let image = Self.image(for: method) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+            } else {
+                Image(systemName: "terminal")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 15, height: 15)
+        .help(method == .automatic ? "Terminal" : method.title)
+    }
+
+    private static func image(for method: OpenMethod) -> NSImage? {
+        if let cached = cache[method] { return cached }
+        guard let url = Opener.appURL(for: method) else { return nil }
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        cache[method] = image
+        return image
+    }
+}
+
 // MARK: - Tags and organizations
 
 enum TagPalette {
@@ -3038,13 +3071,23 @@ struct ProjectSection: View {
             if expanded {
                 let visible = library.visibleSessions(in: project)
                 let repeated = repeatedTitles(in: visible)
-                ForEach(visible) { session in
-                    SessionRow(
-                        library: library, session: session,
-                        rowKey: RowKey.project(session.id),
-                        detail: repeated.contains(session.title) ? firstLine(session.lastPrompt) : nil,
-                        inset: 16
-                    )
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(visible) { session in
+                        SessionRow(
+                            library: library, session: session,
+                            rowKey: RowKey.project(session.id),
+                            detail: repeated.contains(session.title) ? firstLine(session.lastPrompt) : nil,
+                            inset: 16
+                        )
+                    }
+                }
+                .overlay(alignment: .leading) {
+                    // Ties the chats to their project, under the project's arrow.
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.primary.opacity(0.12))
+                        .frame(width: 2)
+                        .padding(.leading, 12)
+                        .padding(.vertical, 4)
                 }
                 if visible.count < project.sessions.count {
                     Button {
@@ -3076,12 +3119,16 @@ struct ProjectSection: View {
     }
 
     private func header(expanded: Bool) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.tertiary)
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .frame(width: 10)
+            Image(systemName: expanded ? "folder.fill" : "folder")
+                .font(.system(size: 12))
+                .foregroundStyle(expanded ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+                .frame(width: 16)
             if library.renamingProject == project.key {
                 TextField(L10n.projectName, text: $draft)
                     .textFieldStyle(.plain)
@@ -3094,12 +3141,15 @@ struct ProjectSection: View {
                     }
             } else {
                 Text(project.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Text("\(project.sessions.count)")
-                    .font(.system(size: 11))
+                    .font(.system(size: 10, weight: .medium))
                     .monospacedDigit()
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .frame(minWidth: 18, minHeight: 15)
+                    .background(Capsule().fill(Color.primary.opacity(0.08)))
             }
             Spacer(minLength: 4)
             if hovering || library.isTiming(project.key) {
@@ -3124,7 +3174,8 @@ struct ProjectSection: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(hovering ? 0.07 : 0))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.primary.opacity(hovering ? 0.08 : (expanded ? 0.045 : 0)))
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }

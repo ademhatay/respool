@@ -84,9 +84,10 @@ The screenshots show made-up data.
   command for opening a tab, so there it is always a window. Settings can send
   sessions somewhere else instead (the Claude app, Terminal, iTerm, VS Code, Cursor or Zed,
   whichever are installed), each project can have its own choice from its context menu, and a
-  session's context menu opens it any of these ways once. An editor is opened on the
-  project's folder with `claude --resume …` on the clipboard, ready to paste into its
-  terminal, since an editor cannot be handed a command. A session that is running always
+  session's context menu opens it any of these ways once. An editor cannot be told to run
+  a command in its own terminal, so choosing one opens the project's folder there and resumes
+  the session beside it in iTerm (or Terminal), with nothing to paste. Each session's row shows
+  the icon of the app it will open in. A session that is running always
   opens where it runs. The button on a project's row starts a new session in its folder.
 - **Updates.** Settings checks GitHub for a newer release and shows the release notes. Nothing
   is asked of the network unless you press the button or turn the daily check on.

@@ -56,9 +56,10 @@ enum Opener {
         case .terminal, .iterm:
             completion(openInTerminal(session, with: method) ? .opened : .failed)
         case .vscode, .cursor, .zed:
+            // An editor cannot be told to run a command in its own terminal, so the folder opens
+            // there and the chat resumes beside it in a terminal, with nothing to paste.
             let opened = openFolder(workingDirectory(for: session), in: method)
-            if opened { copy("claude --resume \(session.id)") }
-            completion(opened ? .openedInEditor : .failed)
+            completion(opened && openInTerminal(session, with: companionTerminal) ? .openedInEditor : .failed)
         }
     }
 
@@ -75,6 +76,19 @@ enum Opener {
 
     private static func openFolder(_ folder: URL, in editor: OpenMethod) -> Bool {
         open(folder, with: editor)
+    }
+
+    /// The terminal a chat runs in when it is opened with an editor: iTerm when it is there.
+    static var companionTerminal: OpenMethod {
+        application(for: .iterm) != nil ? .iterm : .terminal
+    }
+
+    /// The app a way of opening ends up in, for showing its icon.
+    static func appURL(for method: OpenMethod) -> URL? {
+        if method == .desktop {
+            return NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.anthropic.claudefordesktop")
+        }
+        return application(for: method == .automatic ? .terminal : method)
     }
 
     /// Set from Settings: resume in a new tab of iTerm's front window rather than a new window.
@@ -188,11 +202,8 @@ enum Opener {
         }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let argument = trimmed.isEmpty ? "" : " " + quoted(trimmed)
-        if method.isEditor {
-            guard openFolder(URL(fileURLWithPath: folder), in: method) else { return false }
-            copy("claude" + argument)
-            return true
-        }
+        let editor = method.isEditor ? method : nil
+        if let editor, !openFolder(URL(fileURLWithPath: folder), in: editor) { return false }
         let script = """
         #!/bin/zsh -l
         cd \(quoted(folder))
@@ -206,7 +217,8 @@ enum Opener {
         } catch {
             return false
         }
-        return run(url, with: method.isEditor || method == .desktop ? nil : method)
+        if editor != nil { return run(url, with: companionTerminal) }
+        return run(url, with: method == .desktop ? nil : method)
     }
 
     static func revealFolder(_ path: String) {
