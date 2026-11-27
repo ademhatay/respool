@@ -144,6 +144,11 @@ The first time it starts, Respool shows a welcome screen in the middle of the di
 shortcut, the panel's position, where chats open and whether to start at login. Settings can
 show it again.
 
+## Windows
+
+A small Windows version, with the list, search and resuming, is in [`windows/`](windows/README.md).
+It is a preview: it compiles and its shared code is tested, but it has not yet been run on Windows.
+
 ## Install
 
 Requires macOS 14 or later and the Xcode command line tools.
