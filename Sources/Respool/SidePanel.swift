@@ -6,6 +6,8 @@ enum Metrics {
     static let panelWidth: CGFloat = 400
     static let panelRadius: CGFloat = 18
     static let screenInset: CGFloat = 8
+    static let minimumSize = NSSize(width: 320, height: 320)
+    static let maximumWidth: CGFloat = 900
 }
 
 /// A borderless panel that can take keyboard focus without activating the app,
@@ -26,13 +28,16 @@ final class PanelController: NSObject, NSWindowDelegate {
     private let detailPanel: NSPanel
     private let detailBackdrop = NSVisualEffectView()
     private var hoverObserver: AnyCancellable?
+    private var appearanceObserver: AnyCancellable?
     private(set) var isShown = false
+    /// True while the panel is sliding in or out, when its frame changes are not the user's.
+    private var isSettling = true
 
     init(library: Library) {
         self.library = library
         panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: Metrics.panelWidth, height: 600),
-            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView, .resizable],
             backing: .buffered,
             defer: true
         )
@@ -65,7 +70,10 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
-        panel.isMovable = false
+        panel.isMovable = true
+        panel.isMovableByWindowBackground = false
+        panel.minSize = Metrics.minimumSize
+        panel.maxSize = NSSize(width: Metrics.maximumWidth, height: 10_000)
         panel.animationBehavior = .none
         panel.delegate = self
 
@@ -80,6 +88,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         hosting.autoresizingMask = [.width, .height]
         backdrop.addSubview(hosting)
         panel.contentView = backdrop
+
+        appearanceObserver = library.$appearanceChoice.sink { [weak self] choice in
+            // Nil hands the choice back to the system.
+            let appearance: NSAppearance? = choice == "light"
+                ? NSAppearance(named: .aqua) : (choice == "dark" ? NSAppearance(named: .darkAqua) : nil)
+            self?.panel.appearance = appearance
+            self?.detailPanel.appearance = appearance
+        }
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.handle(event) ?? event
@@ -104,8 +120,14 @@ final class PanelController: NSObject, NSWindowDelegate {
         let mouse = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else { return }
         let edge = library.panelEdge
-        let target = Self.frame(for: edge, in: screen.visibleFrame)
+        var target = Self.frame(for: edge, in: screen.visibleFrame)
+        if edge == .free, let saved = Self.savedFrame {
+            // The panel returns to the screen it was left on, if that screen is still there.
+            let home = NSScreen.screens.first { $0.visibleFrame.intersects(saved) } ?? screen
+            target = Self.fitted(saved, in: home.visibleFrame)
+        }
         slide = Self.slide(for: edge)
+        isSettling = true
         panel.setFrame(target.offsetBy(dx: slide.width, dy: slide.height), display: true)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
@@ -124,12 +146,53 @@ final class PanelController: NSObject, NSWindowDelegate {
             panel.animator().alphaValue = 1
         } completionHandler: { [weak self] in
             self?.panel.invalidateShadow()
+            self?.isSettling = false
         }
+    }
+
+    // MARK: - Placement
+
+    private static let frameKey = "panelFrame"
+
+    /// Where the panel was last dragged or resized to.
+    static var savedFrame: NSRect? {
+        guard let text = UserDefaults.standard.string(forKey: frameKey) else { return nil }
+        let frame = NSRectFromString(text)
+        return frame.width >= 1 && frame.height >= 1 ? frame : nil
+    }
+
+    /// A frame brought wholly onto a screen, shrunk first if it is larger than the screen.
+    static func fitted(_ frame: NSRect, in visible: NSRect) -> NSRect {
+        let inset = Metrics.screenInset
+        let width = min(max(frame.width, Metrics.minimumSize.width), min(Metrics.maximumWidth, visible.width - inset * 2))
+        let height = min(max(frame.height, Metrics.minimumSize.height), visible.height - inset * 2)
+        let x = min(max(frame.minX, visible.minX + inset), visible.maxX - width - inset)
+        let y = min(max(frame.minY, visible.minY + inset), visible.maxY - height - inset)
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// The user moved or resized the panel: it now stays wherever it is put.
+    private func rememberFrame() {
+        guard isShown, !isSettling else { return }
+        UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: Self.frameKey)
+        if library.panelEdge != .free { library.panelEdge = .free }
+        slide = Self.slide(for: .free)
+        library.hover = nil
+        panel.invalidateShadow()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        rememberFrame()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        rememberFrame()
     }
 
     func hide() {
         guard isShown else { return }
         isShown = false
+        isSettling = true
         lastHidden = Date()
         liveTimer?.invalidate()
         liveTimer = nil
@@ -188,7 +251,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         let fullHeight = visible.height - inset * 2
         let partHeight = min(fullHeight, max(480, (visible.height * 0.66).rounded()))
         switch edge {
-        case .right:
+        case .right, .free:
             return NSRect(x: visible.maxX - width - inset, y: visible.minY + inset, width: width, height: fullHeight)
         case .left:
             return NSRect(x: visible.minX + inset, y: visible.minY + inset, width: width, height: fullHeight)
@@ -206,6 +269,7 @@ final class PanelController: NSObject, NSWindowDelegate {
         case .left: return CGSize(width: -24, height: 0)
         case .top: return CGSize(width: 0, height: 24)
         case .bottom: return CGSize(width: 0, height: -24)
+        case .free: return CGSize(width: 0, height: -10)
         }
     }
 

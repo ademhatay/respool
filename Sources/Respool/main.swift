@@ -6,6 +6,10 @@ let arguments = CommandLine.arguments
 if let index = arguments.firstIndex(of: "--lang"), index + 1 < arguments.count {
     L10n.override = arguments[index + 1].hasPrefix("tr") ? .turkish : .english
 }
+// Otherwise the language chosen in Settings wins over the system's.
+if L10n.override == nil, let chosen = UserDefaults.standard.string(forKey: "language") {
+    L10n.override = chosen == "tr" ? .turkish : (chosen == "en" ? .english : nil)
+}
 
 if arguments.contains("--index") {
     // Developer mode: index once, print what was found, and exit.
@@ -142,6 +146,30 @@ if let output = value(after: "--snapshot") {
             library.showsOrganizations = arguments.contains("--accounts")
             library.reloadSync()
             library.showingSettings = true
+        }
+        if arguments.contains("--notes") {
+            // Made-up releases, so the notes can be drawn without asking GitHub.
+            library.ingest([
+                Release(version: "0.15.0", notes: "- Export a week of time as CSV\n- Faster search in long chats\n- Fixed the panel jumping on a second display", date: Date(), url: Updates.page),
+                Release(version: "0.14.0", notes: "- Time tracking with a timer and automatic time\n- A timeline of the day and columns for the week\n- Choose where chats open, for everything or per project\n- Drag and resize the panel", date: Date().addingTimeInterval(-9 * 86_400), url: Updates.page),
+                Release(version: "0.13.0", notes: "- Quick task and quick note shortcuts\n- Notes\n- Panel position", date: Date().addingTimeInterval(-20 * 86_400), url: Updates.page),
+            ], installed: "0.14.0")
+            library.showingReleaseNotes = true
+        }
+        if let period = value(after: "--period"), let chosen = TimePeriod.allCases.first(where: { String(describing: $0) == period }) {
+            library.timePeriod = chosen
+        }
+        if arguments.contains("--timer"), let project = library.projects.first {
+            library.startTimer(forProject: project.key)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+            library.reloadSync()
+        }
+        if arguments.contains("--focus-time") {
+            // Folds what sits above the time section, so that it is what the drawing shows.
+            for section in [PanelSection.todos, PanelSection.notes, PanelSection.pinned, PanelSection.recent]
+            where !library.isCollapsed(section) {
+                library.toggleSection(section)
+            }
         }
         if arguments.contains("--detail"), let session = library.recent.dropFirst().first {
             library.hover = HoverTarget(subject: .session(session), screenY: 0)
@@ -344,7 +372,7 @@ if arguments.contains("--selftest") {
             && library.linkTitle(for: projectTask)?.title == target.name)
 
         var started: (folder: String, prompt: String)?
-        library.onStartSession = { started = ($0, $1) }
+        library.onStartSession = { folder, prompt, _ in started = (folder, prompt) }
         library.run(projectTask)
         let hasFolder = target.folders.contains { FileManager.default.fileExists(atPath: $0) }
         check("run starts a session for a project's task",
@@ -441,6 +469,105 @@ if arguments.contains("--selftest") {
         check("a day's row still names its session", RowKey.sessionID(RowKey.day(today, "abc")) == "abc")
         library.dayFold = [:]
         library.selection = nil
+
+        // Time: the arithmetic, the timer, and what the prompts add up to.
+        let stretch = TimeMath.blocks([0, 60, 120, 2000, 2060, 9000], gap: 900)
+        check("moments close together make one stretch of work",
+              stretch == [TimeSpan(start: 0, end: 120), TimeSpan(start: 2000, end: 2060), TimeSpan(start: 9000, end: 9000)])
+        check("overlapping time is counted once",
+              TimeMath.length(TimeMath.merged([TimeSpan(start: 0, end: 100), TimeSpan(start: 50, end: 150), TimeSpan(start: 300, end: 310)])) == 160)
+        check("a period takes only its own part of a stretch",
+              TimeMath.clipped([TimeSpan(start: 0, end: 100)], from: 40, to: 70) == [TimeSpan(start: 40, end: 70)])
+        check("durations read in hours and minutes", Format.clock(3727) == "1:02:07" && Format.shortClock(5040) == "1:24")
+        if library.allProjects.count >= 2 {
+            let one = library.allProjects[0].key, other = library.allProjects[1].key
+            library.startTimer(forProject: one); settle()
+            check("the timer starts for a project", library.runningTimer?.projectKey == one && library.isTiming(one))
+            check("a running timer has its row, however short", library.timeReports[.today]?.rows.contains { $0.key == one } == true)
+            library.startTimer(forProject: other); settle()
+            check("starting another project's timer moves it there", library.isTiming(other) && !library.isTiming(one))
+            library.stopTimer(); settle()
+            check("the timer stops", library.runningTimer == nil)
+            var kept = 0
+            try index.query("SELECT count(*) FROM time_entries") { kept = $0.int(0) }
+            check("a stretch of a few seconds is not kept", kept == 0)
+
+            let nowStamp = Date().timeIntervalSince1970
+            try index.run("INSERT INTO time_entries(project_key, started, ended, open) VALUES(?, ?, ?, 0)", [one, nowStamp - 1200, nowStamp - 600])
+            library.reloadSync()
+            check("a measured stretch is remembered for its project", library.lastTimeEntries[one]?.length == 600)
+            if let row = library.timeReports[.month]?.rows.first(where: { $0.key == one }) {
+                check("the total counts time in both sources once",
+                      row.total <= row.manual + row.automatic + 1 && row.total + 1 >= max(row.manual, row.automatic))
+            }
+            check("a project keeps its color across periods",
+                  library.time(for: one, in: .week)?.color == library.time(for: one, in: .month)?.color)
+            check("the week has seven days and the totals of its days match its rows",
+                  library.timeReports[.week]?.days.count == 7)
+            library.tracksTimeAutomatically = false; library.reloadSync()
+            check("with automatic time off only the timer counts",
+                  library.timeReports.values.allSatisfy { $0.rows.allSatisfy { $0.automatic == 0 } }
+                  && library.timeReports[.month]?.rows.map(\.key) == [one])
+            library.tracksTimeAutomatically = true
+            library.deleteLastTimeEntry(forProject: one); settle()
+            check("the last stretch can be taken back", library.lastTimeEntries[one] == nil)
+
+            try index.run("INSERT INTO time_entries(project_key, started, ended, open) VALUES(?, ?, ?, 1)", [one, nowStamp - 5000, nowStamp - 4000])
+            library.restoreTimer(); library.reloadSync()
+            check("a timer left running long ago ends where it was last seen",
+                  library.runningTimer == nil && library.lastTimeEntries[one]?.length == 1000)
+            try index.run("INSERT INTO time_entries(project_key, started, ended, open) VALUES(?, ?, ?, 1)", [one, nowStamp - 300, nowStamp - 20])
+            library.restoreTimer(); library.reloadSync()
+            check("a timer the app left a moment ago is picked up again", library.isTiming(one))
+            library.stopTimer(); settle()
+            try index.exec("DELETE FROM time_entries"); library.reloadSync()
+        }
+
+        // Where sessions open.
+        if let project = library.allProjects.first, let member = project.sessions.first {
+            var asked: OpenMethod?
+            library.onOpen = { _, method in asked = method }
+            library.openMethod = .automatic
+            library.open(member)
+            check("a session opens the general way by default", asked == .automatic)
+            library.setOpenMethod(.terminal, for: project); settle()
+            check("a project can have its own way of opening", library.openMethod(forProject: project.key) == .terminal)
+            library.open(member)
+            check("its sessions open that way", asked == .terminal)
+            library.open(member, with: .desktop)
+            check("a session can be opened another way just once", asked == .desktop)
+            library.setOpenMethod(nil, for: project); settle()
+            check("the project goes back to the general way", library.projectOpenMethods[project.key] == nil)
+            library.onOpen = nil
+        }
+        check("only installed apps are offered for opening",
+              library.openMethods.contains(.automatic) && library.openMethods.contains(.terminal))
+
+        // Updates and their notes.
+        check("versions compare number by number",
+              Updates.isNewer("0.10.0", than: "0.9.3") && !Updates.isNewer("0.9.3", than: "0.9.3") && Updates.isNewer("1.0", than: "0.99.9"))
+        let listing = Data("""
+        [{"tag_name":"v0.9.0","body":"- one","published_at":"2026-01-02T10:00:00Z","html_url":"https://example.com/a"},
+         {"tag_name":"v0.10.0","body":"## New\\r\\n- two\\r\\n- **three**","published_at":"2026-02-02T10:00:00Z","html_url":"https://example.com/b"},
+         {"tag_name":"v0.11.0","draft":true,"body":""}]
+        """.utf8)
+        let parsed = Updates.parse(listing) ?? []
+        check("releases are read newest first, drafts left out", parsed.map(\.version) == ["0.10.0", "0.9.0"])
+        library.ingest(parsed, installed: "0.9.0")
+        check("a newer release is announced", library.availableUpdate == "0.10.0")
+        library.ingest(parsed, installed: "0.10.0")
+        check("the latest release is up to date", library.updateState == .current)
+        library.ingest(nil)
+        check("an unreachable GitHub is said so", library.updateState == .failed)
+        let noteLines = ReleaseNotesView.lines(of: parsed.first?.notes ?? "")
+        check("notes read as a heading and its points",
+              noteLines.map(\.heading) == [true, false, false] && noteLines.map(\.bullet) == [false, true, true])
+
+        // A panel that was dragged somewhere comes back onto the screen.
+        let desk = NSRect(x: 0, y: 0, width: 1470, height: 900)
+        let strayed = PanelController.fitted(NSRect(x: 1400, y: -200, width: 2000, height: 100), in: desk)
+        check("a remembered frame is brought back onto the screen",
+              desk.contains(strayed) && strayed.width <= Metrics.maximumWidth && strayed.height >= Metrics.minimumSize.height)
 
         // Copies of the transcripts Claude Code is about to delete.
         try? FileManager.default.removeItem(at: Retention.folder)
@@ -570,7 +697,7 @@ if arguments.contains("--selftest") {
         check("shortcut kinds save under their own names",
               Set(ShortcutKind.allCases.map(\.rawValue)).count == 3 && ShortcutKind.quickTask.fallback != ShortcutKind.quickNote.fallback)
         let screen = NSRect(x: 0, y: 0, width: 1470, height: 900)
-        let frames = PanelEdge.allCases.map { PanelController.frame(for: $0, in: screen) }
+        let frames = PanelEdge.edges.map { PanelController.frame(for: $0, in: screen) }
         check("every edge keeps the panel on the screen", frames.allSatisfy { screen.contains($0) })
         check("each edge touches its own side",
               frames[0].maxX > 1400 && frames[1].minX < 20 && frames[2].maxY > 880 && frames[3].minY < 20)

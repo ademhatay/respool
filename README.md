@@ -3,20 +3,21 @@
 # Respool
 
 A side panel for your Claude Code sessions on macOS. It slides in from the right edge of the
-screen, lists every session from every project on your Mac, searches inside them, and takes
-you back to the one you pick.
+screen, lists every session from every project on your Mac, searches inside them, takes you
+back to the one you pick, and shows how long you worked on each project.
 
 Respool is an independent project and is not affiliated with Anthropic.
 
-> The interface is in English and Turkish, and follows your system language.
+> The interface is in English and Turkish. It follows your system language unless you pick one
+> in Settings.
 
 <p align="center">
   <img src="docs/panel.png" width="300" alt="The panel: to-dos, notes, pinned and recent chats">
   <img src="docs/detail.png" width="300" alt="The detail card: context, tokens and activity">
 </p>
 <p align="center">
+  <img src="docs/time.png" width="300" alt="Time: the week by day, and each project's share">
   <img src="docs/search.png" width="300" alt="Searching inside chats">
-  <img src="docs/settings.png" width="300" alt="Settings">
 </p>
 
 The screenshots show made-up data.
@@ -44,6 +45,15 @@ The screenshots show made-up data.
 - **Week.** A summary of the week so far: a row for each day with the sessions used that day and
   how many prompts went into each. A day opens onto its sessions; today is open to begin with.
   The summary can be turned off in Settings.
+- **Time.** How long each project was worked on today, this week and this month. Today is a
+  timeline of the day with every project in its own color; a week or a month is a column for
+  each day. Time comes from two sources, and a minute found in both is counted once:
+  a timer you start and stop on a project (it shows in the menu bar while it runs, and stops
+  when the Mac sleeps), and automatic time worked out from when prompts were typed and
+  answered. Moments closer together than the idle gap (15 minutes unless you change it) count
+  as one stretch of work. Automatic time measures time with Claude Code, not time spent in
+  meetings or editing by hand; it can be turned off in Settings. On the charts the timer's part
+  is drawn solid and the automatic part lighter.
 - **Notes.** Jot a line down from anywhere with the quick-note shortcut; turn it into a task later.
 - **Notifications.** When a session finishes or starts waiting for you, Respool posts a
   notification and shows a count next to its menu bar icon. Clicking the notification opens
@@ -61,9 +71,16 @@ The screenshots show made-up data.
   without opening the session itself.
 - **Details on hover.** Rest the pointer on a session or project for a card with a context
   gauge, token usage, an activity chart, transcript size, model, branch and folder.
-- **Opening.** A session opens where it lives: in the Claude desktop app, by bringing its
-  terminal forward, or by resuming it in a new terminal. The button on a project's row starts
-  a new session in its folder.
+- **Opening.** By default a session opens where it lives: in the Claude desktop app, by
+  bringing its terminal forward, or by resuming it in a new terminal. Settings can send
+  sessions somewhere else instead (the Claude app, Terminal, iTerm, VS Code, Cursor or Zed,
+  whichever are installed), each project can have its own choice from its context menu, and a
+  session's context menu opens it any of these ways once. An editor is opened on the
+  project's folder with `claude --resume …` on the clipboard, ready to paste into its
+  terminal, since an editor cannot be handed a command. A session that is running always
+  opens where it runs. The button on a project's row starts a new session in its folder.
+- **Updates.** Settings checks GitHub for a newer release and shows the release notes. Nothing
+  is asked of the network unless you press the button or turn the daily check on.
 - **Accounts.** Optional. If you use several Claude organizations, a switcher narrows the list
   to one of them.
 
@@ -80,7 +97,10 @@ The screenshots show made-up data.
 
 Hover a session for the pin button; everything else is in its context menu.
 
-The panel opens from the right edge by default; Settings can move it to the left, top or bottom.
+The panel opens from the right edge by default; Settings can move it to the left, top or
+bottom. Or drag it by the margin around the search field or by the footer, and resize it from
+its edges: it then stays where you put it, at the size you gave it, until you pick an edge
+again. Settings also has the theme (system, light or dark) and the language.
 
 ## Install
 
@@ -98,6 +118,9 @@ installing, run `./scripts/bundle.sh`; the app lands in `build/Respool.app`.
 ## Your data
 
 Respool only reads Claude Code's files. It never changes them, and nothing leaves your Mac.
+The one request it can make is the update check, which asks GitHub's public API for this
+repository's releases and sends nothing about you; it runs when you ask, or daily if you turn
+that on.
 
 | Source | Used for |
 |---|---|
@@ -107,7 +130,7 @@ Respool only reads Claude Code's files. It never changes them, and nothing leave
 | `~/Library/Application Support/Claude/claude-code-sessions` | Links to sessions in the desktop app |
 
 These formats belong to Claude Code and can change between versions; Respool was written
-against Claude Code 2.1.332. The index, pins, tasks and tags live in
+against Claude Code 2.1.332. The index, pins, tasks, tags, notes and timer entries live in
 `~/Library/Application Support/Respool/respool.db`.
 
 ## Limits
@@ -124,7 +147,7 @@ against Claude Code 2.1.332. The index, pins, tasks and tags live in
 ```bash
 .build/release/Respool --index --query "some phrase"       # update the index and try a search
 .build/release/Respool --snapshot panel.png --dark         # draw the panel to an image
-RESPOOL_DB=/tmp/test.db .build/release/Respool --selftest  # pins, tasks, tags and filters
+RESPOOL_DB=/tmp/test.db .build/release/Respool --selftest  # pins, tasks, tags, time and the rest
 RESPOOL_DB=/tmp/demo.db .build/release/Respool --snapshot docs/panel.png --demo --lang en --dark  # screenshot with made-up data
 swift scripts/make-icon.swift                              # regenerate the app icon
 ```

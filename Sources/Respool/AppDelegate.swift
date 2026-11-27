@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKeys: [HotKey] = []
     private var notifier: Notifier?
     private var observers = Set<AnyCancellable>()
+    private var clock: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if isAlreadyRunning() {
@@ -27,17 +28,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let controller = PanelController(library: library)
-        library.onOpen = { [weak controller, weak library] session in
+        library.onOpen = { [weak self, weak controller, weak library] session, method in
             guard let library else { return }
-            if library.isInOtherOrganization(session.id) {
+            // A link into another organization does nothing; any other way of opening still works.
+            if method == .automatic || method == .desktop, library.isInOtherOrganization(session.id) {
                 library.show(notice: Self.otherOrganizationNotice(for: session))
                 return
             }
             controller?.hide()
-            Opener.open(session, live: library.live[session.id], desktopID: library.desktopID(for: session.id)) { outcome in
-                guard outcome == .failed else { return }
-                controller?.show()
-                library.show(notice: L10n.chatFailed)
+            Opener.open(
+                session, method: method, live: library.live[session.id], desktopID: library.desktopID(for: session.id)
+            ) { outcome in
+                switch outcome {
+                case .failed:
+                    controller?.show()
+                    library.show(notice: L10n.chatFailed)
+                case .openedInEditor:
+                    self?.announceCopiedCommand(for: session.title)
+                case .opened, .alreadyInTerminal:
+                    break
+                }
             }
         }
         library.onOpenInDesktop = { [weak controller, weak library] session in
@@ -57,12 +67,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 library.show(notice: L10n.chatFailedInClaude)
             }
         }
-        library.onStartSession = { [weak controller, weak library] folder, prompt in
+        library.onStartSession = { [weak self, weak controller, weak library] folder, prompt, method in
             controller?.hide()
-            guard Opener.startSession(in: folder, prompt: prompt) else {
+            guard Opener.startSession(in: folder, prompt: prompt, method: method) else {
                 controller?.show()
                 library?.show(notice: L10n.sessionFailed)
                 return
+            }
+            if method.isEditor {
+                self?.announceCopiedCommand(for: URL(fileURLWithPath: folder).lastPathComponent)
             }
         }
         self.library = library
@@ -91,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.notifier = notifier
 
+        library.restoreTimer()
         installStatusItem()
         // The quick shortcuts open the panel if it is closed, then put the cursor in their field.
         func capture(_ action: @escaping (Library) -> Void) -> () -> Void {
@@ -110,8 +124,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         library.$attention
             .receive(on: RunLoop.main)
-            .sink { [weak self] waiting in self?.showCount(waiting.count) }
+            .sink { [weak self] _ in self?.updateStatusTitle() }
             .store(in: &observers)
+        library.$runningTimer
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateStatusTitle() }
+            .store(in: &observers)
+        clock = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            self?.updateStatusTitle()
+        }
+        // A sleeping Mac is not being worked on.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak library] _ in library?.stopTimer() }
         library.startMonitoring()
 
         library.reload()
@@ -148,11 +173,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
-    /// Shows how many sessions need attention next to the menu bar icon.
-    private func showCount(_ count: Int) {
-        guard let button = statusItem?.button else { return }
-        button.imagePosition = count > 0 ? .imageLeading : .imageOnly
-        button.title = count > 0 ? " \(count)" : ""
+    /// Shows, next to the menu bar icon, how many sessions need attention and how long the
+    /// timer has been running.
+    private func updateStatusTitle() {
+        guard let button = statusItem?.button, let library else { return }
+        var parts: [String] = []
+        if !library.attention.isEmpty { parts.append("\(library.attention.count)") }
+        if let timer = library.runningTimer {
+            parts.append(Format.shortClock(Date().timeIntervalSince(timer.started)))
+        }
+        button.imagePosition = parts.isEmpty ? .imageOnly : .imageLeading
+        button.title = parts.isEmpty ? "" : " " + parts.joined(separator: " · ")
+        button.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    }
+
+    /// An editor has no way to be handed a command, so it is left on the clipboard and said so.
+    private func announceCopiedCommand(for title: String) {
+        library?.show(notice: L10n.commandCopied)
+        if library?.notificationsEnabled == true {
+            notifier?.post(sessionID: "command-copied", title: title, body: L10n.commandCopied)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        library?.recordHeartbeatSync()
     }
 
     @objc private func statusItemClicked() {

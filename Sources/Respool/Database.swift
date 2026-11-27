@@ -205,6 +205,14 @@ enum Schema {
         session_id TEXT NOT NULL, tag_id INTEGER NOT NULL, PRIMARY KEY(session_id, tag_id)
     );
     CREATE TABLE IF NOT EXISTS organization_names(id TEXT PRIMARY KEY, name TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS time_entries(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_key TEXT NOT NULL,
+        started REAL NOT NULL,
+        ended REAL NOT NULL,
+        open INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS project_open(key TEXT PRIMARY KEY, method TEXT NOT NULL);
     """
 }
 

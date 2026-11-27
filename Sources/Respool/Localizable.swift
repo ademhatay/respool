@@ -409,4 +409,60 @@ enum L10n {
             ? [["Staging ortamında dene", "Hata mesajlarını gözden geçir"], [], ["Sonuçları ekiple paylaş"]]
             : [["Try it on staging", "Review the error messages"], [], ["Share the results with the team"]]
     }
+    // MARK: Time tracking
+
+    static var thisMonth: String { tr("Bu ay", "This month") }
+    static var timeTitle: String { tr("Süre", "Time") }
+    static var startTimer: String { tr("Sayacı başlat", "Start the timer") }
+    static var stopTimer: String { tr("Sayacı durdur", "Stop the timer") }
+    static var changePeriod: String { tr("Dönemi değiştir", "Change the period") }
+    static var noTimeYet: String { tr("Bu dönemde süre yok", "No time in this period") }
+    static var worked: String { tr("Çalışma", "Worked") }
+    static var totalTime: String { tr("Toplam", "Total") }
+    static var showTime: String { tr("Süre bölümünü göster", "Show the time section") }
+    static var automaticTime: String { tr("Süreyi otomatik hesapla", "Work out time automatically") }
+    static var idleGap: String { tr("Ara eşiği", "Idle gap") }
+    static func deleteLastEntry(_ length: String) -> String {
+        tr("Son sayaç kaydını sil · \(length)", "Delete the last timer entry · \(length)")
+    }
+    static func timeBreakdown(timer: String, automatic: String) -> String {
+        tr("Sayaç \(timer) · otomatik \(automatic)", "Timer \(timer) · automatic \(automatic)")
+    }
+    static func moreTimeRows(_ figure: Int) -> String { tr("\(figure) proje daha", figure == 1 ? "1 more project" : "\(figure) more projects") }
+
+    // MARK: Opening sessions
+
+    static var openAutomatic: String { tr("Otomatik", "Automatic") }
+    static var openWith: String { tr("Şununla aç", "Open with") }
+    static var openMethodMenu: String { tr("Açma yöntemi", "Opens in") }
+    static var useGeneralSetting: String { tr("Genel ayar", "General setting") }
+    static var openChatsIn: String { tr("Sohbetleri şurada aç", "Open chats in") }
+    static var commandCopied: String {
+        tr("Komut panoda; editörün terminaline yapıştırın", "The command is on the clipboard; paste it in the editor's terminal")
+    }
+
+    // MARK: Panel placement
+
+    static var edgeFree: String { tr("Serbest", "Free") }
+    // MARK: Language and updates
+
+    static var languageTitle: String { tr("Dil", "Language") }
+    static var systemLanguage: String { tr("Sistem", "System") }
+    static func versionTitle(_ version: String) -> String { tr("Sürüm \(version)", "Version \(version)") }
+    static var checkNow: String { tr("Denetle", "Check") }
+    static var checking: String { tr("Denetleniyor…", "Checking…") }
+    static var upToDate: String { tr("Güncel", "Up to date") }
+    static var checkFailed: String { tr("GitHub'a ulaşılamadı", "Could not reach GitHub") }
+    static func updateAvailable(_ version: String) -> String { tr("\(version) yayında", "\(version) is out") }
+    static var releaseNotes: String { tr("Sürüm notları", "Release notes") }
+    static var view: String { tr("Göster", "View") }
+    static var checkAutomatically: String { tr("Güncellemeleri kendiliğinden denetle", "Check for updates automatically") }
+    static var installedBadge: String { tr("Yüklü", "Installed") }
+    static var newBadge: String { tr("Yeni", "New") }
+    static var openOnGitHub: String { tr("GitHub'da aç", "Open on GitHub") }
+    static var noReleases: String { tr("Henüz yayımlanmış sürüm yok", "No releases published yet") }
+    static func updateMenu(_ version: String) -> String { tr("Yeni sürüm: \(version)…", "New version: \(version)…") }
+    static var themeTitle: String { tr("Tema", "Theme") }
+    static var themeLight: String { tr("Açık", "Light") }
+    static var themeDark: String { tr("Koyu", "Dark") }
 }

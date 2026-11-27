@@ -22,19 +22,65 @@ enum Opener {
         case failed
         /// The session is running in a terminal, so that terminal was brought forward instead.
         case alreadyInTerminal
+        /// The project was opened in an editor and the command to resume is on the clipboard.
+        case openedInEditor
     }
 
     /// Opens a session where it lives: a session the desktop app tracks opens there, a session
     /// running in a terminal brings that terminal forward, and any other is resumed in a new one.
-    static func open(_ session: SessionRecord, live: LiveSession?, desktopID: String?, completion: @escaping (Outcome) -> Void) {
+    ///
+    /// A method other than the automatic one sends a session that is not running to the app it
+    /// names. A running session is never resumed a second time, so it always opens where it runs.
+    static func open(
+        _ session: SessionRecord, method: OpenMethod = .automatic, live: LiveSession?, desktopID: String?,
+        completion: @escaping (Outcome) -> Void
+    ) {
         if let live, live.isInTerminal {
             LiveSessions.activateHost(of: live.pid)
             completion(.alreadyInTerminal)
-        } else if desktopID != nil {
-            openInDesktop(session, desktopID: desktopID, completion: completion)
-        } else {
-            completion(openInTerminal(session) ? .opened : .failed)
+            return
         }
+        if live != nil {
+            openInDesktop(session, desktopID: desktopID, completion: completion)
+            return
+        }
+        switch method {
+        case .automatic:
+            if desktopID != nil {
+                openInDesktop(session, desktopID: desktopID, completion: completion)
+            } else {
+                completion(openInTerminal(session) ? .opened : .failed)
+            }
+        case .desktop:
+            openInDesktop(session, desktopID: desktopID, completion: completion)
+        case .terminal, .iterm:
+            completion(openInTerminal(session, with: method) ? .opened : .failed)
+        case .vscode, .cursor, .zed:
+            let opened = openFolder(workingDirectory(for: session), in: method)
+            if opened { copy("claude --resume \(session.id)") }
+            completion(opened ? .openedInEditor : .failed)
+        }
+    }
+
+    private static func application(for method: OpenMethod) -> URL? {
+        method.bundleID.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+    }
+
+    /// Opens a file or folder with the app a method names. False when that app is not installed.
+    private static func open(_ url: URL, with method: OpenMethod) -> Bool {
+        guard let app = application(for: method) else { return false }
+        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+        return true
+    }
+
+    private static func openFolder(_ folder: URL, in editor: OpenMethod) -> Bool {
+        open(folder, with: editor)
+    }
+
+    /// Runs a script in the terminal a method names, or in the one that opens scripts by default.
+    private static func run(_ script: URL, with method: OpenMethod?) -> Bool {
+        if let method, method.bundleID != nil { return open(script, with: method) }
+        return NSWorkspace.shared.open(script)
     }
 
     /// Opens the session in the Claude desktop app.
@@ -68,9 +114,9 @@ enum Opener {
         }
     }
 
-    /// Resumes the session in a new Terminal window.
+    /// Resumes the session in a new terminal window.
     @discardableResult
-    static func openInTerminal(_ session: SessionRecord) -> Bool {
+    static func openInTerminal(_ session: SessionRecord, with method: OpenMethod? = nil) -> Bool {
         let folder = workingDirectory(for: session).path.replacingOccurrences(of: "'", with: "'\\''")
         let script = """
         #!/bin/zsh -l
@@ -85,18 +131,24 @@ enum Opener {
         } catch {
             return false
         }
-        return NSWorkspace.shared.open(url)
+        return run(url, with: method)
     }
 
     /// Starts a new Claude Code session in a folder, with the given text as its first prompt
-    /// or with none to type when it is blank.
+    /// or with none to type when it is blank. An editor opens the folder instead and the
+    /// command is left on the clipboard.
     @discardableResult
-    static func startSession(in folder: String, prompt: String) -> Bool {
+    static func startSession(in folder: String, prompt: String, method: OpenMethod = .automatic) -> Bool {
         func quoted(_ text: String) -> String {
             "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
         }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let argument = trimmed.isEmpty ? "" : " " + quoted(trimmed)
+        if method.isEditor {
+            guard openFolder(URL(fileURLWithPath: folder), in: method) else { return false }
+            copy("claude" + argument)
+            return true
+        }
         let script = """
         #!/bin/zsh -l
         cd \(quoted(folder))
@@ -110,7 +162,7 @@ enum Opener {
         } catch {
             return false
         }
-        return NSWorkspace.shared.open(url)
+        return run(url, with: method.isEditor || method == .desktop ? nil : method)
     }
 
     static func revealFolder(_ path: String) {

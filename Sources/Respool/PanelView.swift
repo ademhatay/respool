@@ -23,7 +23,9 @@ struct PanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if library.showingSettings {
+            if library.showingReleaseNotes {
+                ReleaseNotesView(library: library)
+            } else if library.showingSettings {
                 SettingsView(library: library, focus: $focus)
             } else if let outline = library.outline {
                 OutlineView(library: library, outline: outline)
@@ -34,6 +36,9 @@ struct PanelView: View {
                     ExpiryBanner(library: library)
                 }
                 content
+            }
+            if let timer = library.runningTimer {
+                TimerBar(library: library, timer: timer)
             }
             footer
         }
@@ -79,6 +84,9 @@ struct PanelView: View {
                 Button(L10n.refresh) { library.refresh() }
                 Button(L10n.newTag) { library.tagEditor = TagEditor() }
                 Button(L10n.settingsMenu) { library.showingSettings = true }
+                if let version = library.availableUpdate {
+                    Button(L10n.updateMenu(version)) { library.showingReleaseNotes = true }
+                }
                 Divider()
                 Button(L10n.quit) { NSApp.terminate(nil) }
             } label: {
@@ -100,6 +108,7 @@ struct PanelView: View {
         .padding(.horizontal, 12)
         .padding(.top, 12)
         .padding(.bottom, 4)
+        .background(WindowDragArea())
     }
 
     // MARK: - Filters
@@ -215,6 +224,8 @@ struct PanelView: View {
             }
         }
 
+        TimeSection(library: library)
+
         WeekSection(library: library, focus: $focus)
 
         CollapsibleHeader(
@@ -329,6 +340,7 @@ struct PanelView: View {
         .foregroundStyle(.tertiary)
         .padding(.horizontal, 18)
         .frame(height: 30)
+        .background(WindowDragArea())
         .overlay(alignment: .top) {
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
         }
@@ -337,7 +349,7 @@ struct PanelView: View {
     private var statusText: String {
         if let notice = library.notice { return notice }
         if let progress = library.indexing, progress.total > 0 {
-            return "Dizine ekleniyor \(progress.done) / \(progress.total)"
+            return L10n.indexing + " \(progress.done) / \(progress.total)"
         }
         // Says how many projects are left out, when the list is thinner than the index.
         let shown = library.projects.count, total = library.allProjects.count
@@ -544,11 +556,19 @@ struct SessionRow: View {
     }
 
     @ViewBuilder private func menu(pinned: Bool, live: LiveSession?) -> some View {
-        Button(L10n.openInClaude) { library.openInDesktop(session) }
-        Button(L10n.resumeInTerminal) {
-            if !Opener.openInTerminal(session) { library.show(notice: L10n.terminalFailed) }
+        Menu(L10n.openWith) {
+            ForEach(library.openMethods.filter { $0 != .automatic }, id: \.self) { method in
+                Button(method.title) {
+                    if method == .desktop {
+                        library.openInDesktop(session)
+                    } else {
+                        library.open(session, with: method)
+                    }
+                }
+                // A running session is not resumed a second time somewhere else.
+                .disabled(live != nil && method != .desktop)
+            }
         }
-        .disabled(live != nil)
         Button(L10n.promptOutline) { library.showOutline(for: session) }
         Divider()
         Button(pinned ? L10n.unpin : L10n.pin) { library.togglePin(session) }
@@ -1361,6 +1381,449 @@ struct DayRow: View {
     }
 }
 
+// MARK: - Time
+
+/// The colors projects are drawn in on the time charts. The busiest projects take them in turn;
+/// the rest share a gray.
+enum TimePalette {
+    static let colors: [Color] = [.blue, .orange, .green, .purple, .pink, .teal, .yellow, .indigo]
+    static var count: Int { colors.count }
+
+    static func color(_ index: Int?) -> Color {
+        guard let index, colors.indices.contains(index) else { return Color.gray }
+        return colors[index]
+    }
+}
+
+/// How long each project was worked on: a chart of the period, then a row for each project.
+struct TimeSection: View {
+    @ObservedObject var library: Library
+
+    @State private var showsAll = false
+    private static let shown = 5
+
+    var body: some View {
+        if library.showsTime {
+            let report = library.timeReport
+            CollapsibleHeader(library: library, title: L10n.timeTitle, section: PanelSection.time) {
+                periodButton(total: report.total)
+            }
+            if !library.isCollapsed(PanelSection.time) {
+                if report.rows.isEmpty {
+                    Text(L10n.noTimeYet)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                } else {
+                    let axis = DayAxis(report: report)
+                    Group {
+                        if library.timePeriod == .today {
+                            DayTimeline(rows: report.rows, axis: axis)
+                        } else {
+                            DayColumns(report: report, compact: library.timePeriod == .month)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 4)
+                    .padding(.bottom, 6)
+                    let rows = showsAll ? report.rows : Array(report.rows.prefix(Self.shown))
+                    let peak = report.rows.first?.total ?? 1
+                    ForEach(rows) { row in
+                        TimeRow(
+                            library: library, row: row, peak: peak,
+                            axis: library.timePeriod == .today ? axis : nil
+                        )
+                    }
+                    if report.rows.count > rows.count {
+                        Button {
+                            showsAll = true
+                        } label: {
+                            Text(L10n.moreTimeRows(report.rows.count - rows.count))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Names the period and its total; a click moves on to the next period.
+    private func periodButton(total: TimeInterval) -> some View {
+        Button {
+            library.timePeriod = library.timePeriod.next
+        } label: {
+            HStack(spacing: 5) {
+                Text(library.timePeriod.title)
+                    .foregroundStyle(.secondary)
+                if total >= 60 {
+                    Text(Format.worked(total))
+                        .foregroundStyle(.primary)
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .monospacedDigit()
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(Capsule().fill(Color.primary.opacity(0.07)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.changePeriod)
+        .padding(.top, 10)
+    }
+}
+
+/// The hours a day's timeline runs across: from the hour work began to the hour it is now,
+/// and never less than four hours, so a short morning is not stretched across the panel.
+struct DayAxis: Hashable {
+    var start: Double
+    var end: Double
+
+    init(report: TimeReport) {
+        let hour = 3600.0
+        let first = report.rows.flatMap { $0.timed + $0.guessed }.map(\.start).min() ?? report.end
+        var head = report.start + ((first - report.start) / hour).rounded(.down) * hour
+        let tail = report.start + ((report.end - report.start) / hour).rounded(.up) * hour
+        if tail - head < 4 * hour { head = max(report.start, tail - 4 * hour) }
+        start = head
+        end = max(tail, head + hour)
+    }
+
+    func fraction(_ stamp: Double) -> CGFloat {
+        CGFloat(min(max((stamp - start) / (end - start), 0), 1))
+    }
+
+    /// The hours to name under the timeline, at most five of them.
+    var marks: [Double] {
+        let hours = Int(((end - start) / 3600).rounded())
+        let step = max(1, Int((Double(hours) / 4).rounded(.up)))
+        return stride(from: 0, through: hours, by: step).map { start + Double($0) * 3600 }
+    }
+}
+
+/// Draws stretches of time along a day's axis. What the timer measured is drawn solid and
+/// what the prompts suggest is drawn lighter.
+struct TimeTrack: View {
+    let rows: [ProjectTime]
+    let axis: DayAxis
+    var height: CGFloat = 14
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: height / 3, style: .continuous)
+                    .fill(Color.primary.opacity(0.07))
+                ForEach(rows) { row in
+                    let color = TimePalette.color(row.color)
+                    ForEach(row.guessed, id: \.self) { span in
+                        piece(span, color.opacity(0.5), width: proxy.size.width)
+                    }
+                    ForEach(row.timed, id: \.self) { span in
+                        piece(span, color, width: proxy.size.width)
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: height / 3, style: .continuous))
+        }
+        .frame(height: height)
+    }
+
+    private func piece(_ span: TimeSpan, _ color: Color, width: CGFloat) -> some View {
+        let head = axis.fraction(span.start) * width
+        let tail = axis.fraction(span.end) * width
+        return Rectangle()
+            .fill(color)
+            .frame(width: max(tail - head, 1.5))
+            .offset(x: head)
+    }
+}
+
+/// Every project's day on one line. Where several were worked on at once they share the
+/// line's height, so no color hides another.
+struct SharedTrack: View {
+    let rows: [ProjectTime]
+    let axis: DayAxis
+
+    private static let height: CGFloat = 16
+
+    private struct Slice: Hashable {
+        var span: TimeSpan
+        /// The colors of the projects at work in the span, the busiest first.
+        var colors: [Int?]
+    }
+
+    /// Cuts the day wherever a project starts or stops, and notes who is at work in each piece.
+    private var slices: [Slice] {
+        let spans = rows.map { TimeMath.merged($0.timed + $0.guessed) }
+        let cuts = Set(spans.flatMap { $0.flatMap { [$0.start, $0.end] } }).sorted()
+        var slices: [Slice] = []
+        for (head, tail) in zip(cuts, cuts.dropFirst()) {
+            let middle = (head + tail) / 2
+            let colors = rows.indices
+                .filter { index in spans[index].contains { $0.start <= middle && middle < $0.end } }
+                .map { rows[$0].color }
+            if !colors.isEmpty { slices.append(Slice(span: TimeSpan(start: head, end: tail), colors: colors)) }
+        }
+        return slices
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(0.07))
+                ForEach(slices, id: \.self) { slice in
+                    let head = axis.fraction(slice.span.start) * proxy.size.width
+                    let tail = axis.fraction(slice.span.end) * proxy.size.width
+                    VStack(spacing: 0) {
+                        ForEach(slice.colors.indices, id: \.self) { index in
+                            Rectangle().fill(TimePalette.color(slice.colors[index]))
+                        }
+                    }
+                    // A hair wider than its share, so neighbors meet without a seam.
+                    .frame(width: max(tail - head + 0.5, 1.5))
+                    .offset(x: head)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        }
+        .frame(height: Self.height)
+    }
+}
+
+/// Today as one line: every project in its color, with the hours underneath.
+struct DayTimeline: View {
+    let rows: [ProjectTime]
+    let axis: DayAxis
+
+    var body: some View {
+        VStack(spacing: 4) {
+            SharedTrack(rows: rows, axis: axis)
+            GeometryReader { proxy in
+                let marks = axis.marks
+                ForEach(marks.indices, id: \.self) { index in
+                    let x = axis.fraction(marks[index]) * proxy.size.width
+                    Text(Format.time(Date(timeIntervalSince1970: marks[index])))
+                        .fixedSize()
+                        .alignmentGuide(.leading) { size in
+                            // The first hour hangs from its mark and the last one ends at it.
+                            index == 0 ? 0 : (index == marks.count - 1 ? size.width : size.width / 2)
+                        }
+                        .offset(x: x)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .frame(height: 11)
+            .font(.system(size: 9))
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// A week or a month as a column for each day, the projects stacked in their colors.
+struct DayColumns: View {
+    let report: TimeReport
+    let compact: Bool
+
+    private static let height: CGFloat = 46
+
+    var body: some View {
+        let peak = max(report.days.map(\.total).max() ?? 0, 1)
+        let order = report.rows.map(\.key)
+        let colors = Dictionary(uniqueKeysWithValues: report.rows.map { ($0.key, TimePalette.color($0.color)) })
+        VStack(spacing: 4) {
+            HStack(alignment: .bottom, spacing: compact ? 2 : 6) {
+                ForEach(report.days) { day in
+                    column(day, peak: peak, order: order, colors: colors)
+                }
+            }
+            .frame(height: Self.height, alignment: .bottom)
+            HStack(spacing: compact ? 2 : 6) {
+                ForEach(report.days) { day in
+                    Text(label(day))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .font(.system(size: 9))
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
+        }
+    }
+
+    @ViewBuilder
+    private func column(_ day: DayTime, peak: TimeInterval, order: [String], colors: [String: Color]) -> some View {
+        let total = day.total
+        VStack(spacing: 0) {
+            if total < 60 {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(height: 2)
+            } else {
+                let full = max(4, Self.height * CGFloat(total / peak))
+                VStack(spacing: 0) {
+                    ForEach(order.reversed().filter { day.parts[$0] != nil }, id: \.self) { key in
+                        Rectangle()
+                            .fill(colors[key] ?? Color.gray)
+                            .frame(height: full * CGFloat((day.parts[key] ?? 0) / total))
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: compact ? 1.5 : 3, style: .continuous))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .contentShape(Rectangle())
+        .help(Format.shortDay(day.date) + (total >= 60 ? " · " + Format.worked(total) : ""))
+    }
+
+    /// A week names every day; a month only the first of each week, where there is room.
+    private func label(_ day: DayTime) -> String {
+        let number = Library.calendar.component(.day, from: day.date)
+        if compact { return (number - 1) % 7 == 0 ? "\(number)" : " " }
+        return Format.weekday(day.date)
+    }
+}
+
+/// One project in the time section: its color, its name and how long, with either its own
+/// line on the day's axis or a bar measured against the busiest project.
+struct TimeRow: View {
+    @ObservedObject var library: Library
+    let row: ProjectTime
+    let peak: TimeInterval
+    /// The day's axis, when the period is short enough to draw the project's own timeline.
+    let axis: DayAxis?
+
+    @State private var hovering = Snapshot.showsHover
+
+    var body: some View {
+        let running = library.isTiming(row.key)
+        let color = TimePalette.color(row.color)
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+                Text(row.name)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if hovering || running {
+                    IconButton(
+                        symbol: running ? "stop.fill" : "play.fill",
+                        help: running ? L10n.stopTimer : L10n.startTimer,
+                        style: RowStyle(selected: false)
+                    ) {
+                        library.toggleTimer(forProject: row.key)
+                    }
+                }
+                Text(Format.worked(row.total))
+                    .font(.system(size: 11))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            // The project's own line sits under the shared one, on the same hours.
+            if let axis {
+                TimeTrack(rows: [row], axis: axis, height: 4)
+            } else {
+                bar(color).padding(.leading, 14)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(hovering ? 0.07 : 0))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .help(L10n.timeBreakdown(timer: Format.worked(row.manual), automatic: Format.worked(row.automatic)))
+        .contextMenu {
+            Button(running ? L10n.stopTimer : L10n.startTimer) { library.toggleTimer(forProject: row.key) }
+            if let entry = library.lastTimeEntries[row.key] {
+                Button(L10n.deleteLastEntry(Format.worked(entry.length))) {
+                    library.deleteLastTimeEntry(forProject: row.key)
+                }
+            }
+        }
+    }
+
+    /// The project against the busiest one. The part the timer measured is solid.
+    private func bar(_ color: Color) -> some View {
+        GeometryReader { proxy in
+            let width = max(proxy.size.width * CGFloat(row.total / max(peak, 1)), 3)
+            let timed = width * CGFloat(min(row.manual / max(row.total, 1), 1))
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.07))
+                Capsule().fill(color.opacity(0.5)).frame(width: width)
+                if timed >= 1 { Capsule().fill(color).frame(width: max(timed, 3)) }
+            }
+        }
+        .frame(height: 4)
+    }
+}
+
+/// The running timer, kept in view above the footer wherever the list is scrolled to.
+struct TimerBar: View {
+    @ObservedObject var library: Library
+    let timer: RunningTimer
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: 7, height: 7)
+            Text(timer.projectName)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            TimelineView(.periodic(from: timer.started, by: 1)) { context in
+                Text(Format.clock(context.date.timeIntervalSince(timer.started)))
+                    .font(.system(size: 12))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+            Button {
+                library.stopTimer()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.primary.opacity(0.09)))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.stopTimer)
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 14)
+        .frame(height: 34)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+        }
+    }
+}
+
+/// A part of the panel the window can be dragged by.
+struct WindowDragArea: NSViewRepresentable {
+    final class Handle: NSView {
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
+    }
+
+    func makeNSView(context: Context) -> Handle { Handle() }
+    func updateNSView(_ view: Handle, context: Context) {}
+}
+
 // MARK: - Tags and organizations
 
 enum TagPalette {
@@ -1607,7 +2070,7 @@ struct DetailCard: View {
 
         HStack(spacing: 6) {
             StatTile(value: Format.count(session.messageCount), label: L10n.prompts)
-            StatTile(value: duration(of: session), label: L10n.duration)
+            StatTile(value: series?.worked.map(Format.worked) ?? "—", label: L10n.worked)
             StatTile(value: Format.bytes(session.fileSize), label: L10n.size)
         }
 
@@ -1641,9 +2104,9 @@ struct DetailCard: View {
         }
     }
 
-    private func duration(of session: SessionRecord) -> String {
-        guard let first = session.firstActivity, let last = session.lastActivity else { return "—" }
-        return Format.duration(last.timeIntervalSince(first))
+    /// The chart and total for what the card describes, once they have been read.
+    private var series: ActivitySeries? {
+        library.hoverActivity?.key == subject.key ? library.hoverActivity : nil
     }
 
     // MARK: Project
@@ -1654,7 +2117,7 @@ struct DetailCard: View {
             Text(project.name)
                 .font(.system(size: 14, weight: .semibold))
                 .lineLimit(2)
-            Text("Son etkinlik " + Format.date(project.lastActivity))
+            Text(L10n.lastActivity(Format.date(project.lastActivity)))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
@@ -1670,6 +2133,14 @@ struct DetailCard: View {
                 StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.inputTokens }), label: L10n.input)
                 StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.cachedTokens }), label: L10n.cache)
                 StatTile(value: Format.tokens(sessions.reduce(0) { $0 + $1.outputTokens }), label: L10n.output)
+            }
+        }
+
+        section(L10n.timeTitle) {
+            HStack(spacing: 6) {
+                StatTile(value: worked(on: project, in: .today), label: L10n.today)
+                StatTile(value: worked(on: project, in: .week), label: L10n.weekTitle)
+                StatTile(value: series?.worked.map(Format.worked) ?? "—", label: L10n.totalTime)
             }
         }
 
@@ -1690,6 +2161,10 @@ struct DetailCard: View {
         }
     }
 
+    private func worked(on project: ProjectGroup, in period: TimePeriod) -> String {
+        library.time(for: project.key, in: period).map { Format.worked($0.total) } ?? "—"
+    }
+
     // MARK: Pieces
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -1702,8 +2177,7 @@ struct DetailCard: View {
     }
 
     private var activityChart: some View {
-        let series = library.hoverActivity?.key == subject.key ? library.hoverActivity : nil
-        return VStack(spacing: 4) {
+        VStack(spacing: 4) {
             ActivityChart(buckets: series?.buckets ?? Array(repeating: 0, count: Library.activityBuckets))
             HStack {
                 Text(series?.startLabel ?? " ")
@@ -1982,12 +2456,24 @@ struct SettingsView: View {
                     SettingsGroup {
                         SettingsRow(title: L10n.panelPosition) {
                             Picker(L10n.panelPosition, selection: $library.panelEdge) {
-                                ForEach(PanelEdge.allCases, id: \.self) { edge in
+                                ForEach(PanelEdge.edges, id: \.self) { edge in
                                     Text(edge.title).tag(edge)
                                 }
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
+                            .fixedSize()
+                        }
+                    }
+                    SettingsGroup {
+                        SettingsRow(title: L10n.openChatsIn) {
+                            Picker(L10n.openChatsIn, selection: $library.openMethod) {
+                                ForEach(library.openMethods, id: \.self) { method in
+                                    Text(method.title).tag(method)
+                                }
+                            }
+                            .labelsHidden()
+                            .controlSize(.small)
                             .fixedSize()
                         }
                     }
@@ -2024,6 +2510,78 @@ struct SettingsView: View {
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
+                        }
+                    }
+                    SettingsGroup {
+                        VStack(spacing: 0) {
+                            SettingsRow(title: L10n.showTime) {
+                                Toggle("", isOn: $library.showsTime)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                            }
+                            SettingsRow(title: L10n.automaticTime) {
+                                Toggle("", isOn: $library.tracksTimeAutomatically)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                            }
+                            if library.tracksTimeAutomatically {
+                                SettingsRow(title: L10n.idleGap) {
+                                    Picker(L10n.idleGap, selection: $library.idleGapMinutes) {
+                                        ForEach(Library.idleGapChoices, id: \.self) { minutes in
+                                            Text(L10n.minutes(minutes)).tag(minutes)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .labelsHidden()
+                                    .fixedSize()
+                                }
+                            }
+                        }
+                    }
+                    SettingsGroup {
+                        VStack(spacing: 0) {
+                            SettingsRow(title: L10n.themeTitle) {
+                                Picker(L10n.themeTitle, selection: $library.appearanceChoice) {
+                                    Text(L10n.systemLanguage).tag("")
+                                    Text(L10n.themeLight).tag("light")
+                                    Text(L10n.themeDark).tag("dark")
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                .fixedSize()
+                            }
+                            SettingsRow(title: L10n.languageTitle) {
+                                Picker(L10n.languageTitle, selection: $library.languageChoice) {
+                                    Text(L10n.systemLanguage).tag("")
+                                    Text("Türkçe").tag("tr")
+                                    Text("English").tag("en")
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                .fixedSize()
+                            }
+                        }
+                    }
+                    SettingsGroup {
+                        VStack(spacing: 0) {
+                            SettingsRow(title: L10n.versionTitle(library.installedVersion)) {
+                                updateStatus
+                                Button(L10n.checkNow) { library.checkForUpdates() }
+                                    .controlSize(.small)
+                                    .disabled(library.updateState == .checking)
+                            }
+                            SettingsRow(title: L10n.releaseNotes) {
+                                Button(L10n.view) { library.showingReleaseNotes = true }
+                                    .controlSize(.small)
+                            }
+                            SettingsRow(title: L10n.checkAutomatically) {
+                                Toggle("", isOn: $library.checksForUpdates)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                            }
                         }
                     }
                     if library.backupCount > 0 {
@@ -2090,6 +2648,35 @@ struct SettingsView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
+    /// What the last check found, beside the button that checks again.
+    @ViewBuilder private var updateStatus: some View {
+        switch library.updateState {
+        case .unknown:
+            EmptyView()
+        case .checking:
+            statusLabel(L10n.checking, .secondary)
+        case .current:
+            statusLabel(L10n.upToDate, .secondary)
+        case .failed:
+            statusLabel(L10n.checkFailed, .secondary)
+        case .available(let version):
+            Button {
+                library.showingReleaseNotes = true
+            } label: {
+                statusLabel(L10n.updateAvailable(version), Color.accentColor)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func statusLabel(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .lineLimit(1)
+    }
+
     private func shortcutButton(_ kind: ShortcutKind) -> some View {
         let recording = library.recordingKind == kind
         return Button {
@@ -2123,6 +2710,138 @@ struct SettingsView: View {
         if library.recordingKind == kind { return L10n.pressKeys }
         let label = library.shortcutLabels[kind] ?? ""
         return label.isEmpty ? L10n.notAssigned : label
+    }
+}
+
+/// What changed in each version, as its release on GitHub describes it.
+struct ReleaseNotesView: View {
+    @ObservedObject var library: Library
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Button {
+                    library.showingReleaseNotes = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L10n.back)
+                Text(L10n.releaseNotes)
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+            .background(WindowDragArea())
+
+            if library.releases.isEmpty {
+                Text(emptyText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 48)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(library.releases) { release in
+                            card(release)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 16)
+                }
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var emptyText: String {
+        switch library.updateState {
+        case .checking, .unknown: return L10n.checking
+        case .failed: return L10n.checkFailed
+        default: return L10n.noReleases
+        }
+    }
+
+    private func card(_ release: Release) -> some View {
+        let isNew = Updates.isNewer(release.version, than: library.installedVersion) && library.availableUpdate != nil
+        let isInstalled = release.version == library.installedVersion
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Text(release.version)
+                    .font(.system(size: 13, weight: .semibold))
+                    .monospacedDigit()
+                if isNew {
+                    badge(L10n.newBadge, Color.accentColor)
+                } else if isInstalled {
+                    badge(L10n.installedBadge, Color.secondary)
+                }
+                Spacer(minLength: 8)
+                if let date = release.date {
+                    Text(Format.releaseDate(date))
+                        .font(.system(size: 11))
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(Self.lines(of: release.notes).enumerated()), id: \.offset) { _, line in
+                    if line.bullet {
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Text("•").foregroundStyle(.tertiary)
+                            Text(line.text).fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Text(line.text)
+                            .fontWeight(line.heading ? .semibold : .regular)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .font(.system(size: 12))
+            if isNew, let url = URL(string: release.url) {
+                Button(L10n.openOnGitHub) { NSWorkspace.shared.open(url) }
+                    .controlSize(.small)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
+    }
+
+    private func badge(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .frame(height: 16)
+            .background(Capsule().fill(color.opacity(0.14)))
+    }
+
+    /// The notes line by line, with Markdown's list and heading marks taken as what they mean.
+    static func lines(of notes: String) -> [(text: AttributedString, bullet: Bool, heading: Bool)] {
+        notes.split(whereSeparator: \.isNewline).compactMap { raw in
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { return nil }
+            var bullet = false, heading = false
+            if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                bullet = true
+                line = String(line.dropFirst(2))
+            } else if line.hasPrefix("#") {
+                heading = true
+                line = line.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
+            }
+            let text = (try? AttributedString(markdown: line)) ?? AttributedString(line)
+            return (text, bullet, heading)
+        }
     }
 }
 
@@ -2233,6 +2952,15 @@ struct ProjectSection: View {
                     .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 4)
+            if hovering || library.isTiming(project.key) {
+                let timing = library.isTiming(project.key)
+                IconButton(
+                    symbol: timing ? "stop.fill" : "play.fill",
+                    help: timing ? L10n.stopTimer : L10n.startTimer, style: RowStyle(selected: false)
+                ) {
+                    library.toggleTimer(forProject: project.key)
+                }
+            }
             if hovering {
                 IconButton(symbol: "terminal", help: L10n.startChatHere, style: RowStyle(selected: false)) {
                     library.startSession(in: project)
@@ -2260,6 +2988,22 @@ struct ProjectSection: View {
     @ViewBuilder private var menu: some View {
         Button(L10n.startChat) { library.startSession(in: project) }
         Button(L10n.addTask) { library.beginTask(linkedTo: .project(key: project.key, name: project.name)) }
+        Button(library.isTiming(project.key) ? L10n.stopTimer : L10n.startTimer) {
+            library.toggleTimer(forProject: project.key)
+        }
+        Menu(L10n.openMethodMenu) {
+            Toggle(L10n.useGeneralSetting, isOn: Binding(
+                get: { library.projectOpenMethods[project.key] == nil },
+                set: { _ in library.setOpenMethod(nil, for: project) }
+            ))
+            Divider()
+            ForEach(library.openMethods, id: \.self) { method in
+                Toggle(method.title, isOn: Binding(
+                    get: { library.projectOpenMethods[project.key] == method },
+                    set: { _ in library.setOpenMethod(method, for: project) }
+                ))
+            }
+        }
         Button(L10n.rename) { library.renamingProject = project.key }
         Menu(L10n.mergeInto) {
             ForEach(library.allProjects.filter { $0.key != project.key }) { other in

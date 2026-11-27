@@ -134,6 +134,75 @@ final class Library: ObservableObject {
     @Published var expanded: Set<String> {
         didSet { UserDefaults.standard.set(Array(expanded), forKey: "expandedProjects") }
     }
+    /// The releases GitHub lists, newest first, once they have been asked for.
+    @Published private(set) var releases: [Release] = []
+    @Published private(set) var updateState = UpdateState.unknown
+    /// The version of this copy of the app, which the releases are measured against.
+    @Published private(set) var installedVersion = Updates.installed
+    @Published var showingReleaseNotes = false {
+        didSet { if showingReleaseNotes, releases.isEmpty { checkForUpdates() } }
+    }
+    /// Off by default, so that nothing is asked of the network unless the user wants it.
+    @Published var checksForUpdates: Bool {
+        didSet {
+            UserDefaults.standard.set(checksForUpdates, forKey: "checksForUpdates")
+            if checksForUpdates { checkForUpdatesIfDue() }
+        }
+    }
+    /// The interface language: "tr", "en", or empty to follow the system. A change restarts the app.
+    @Published var languageChoice: String {
+        didSet {
+            guard languageChoice != oldValue else { return }
+            if languageChoice.isEmpty {
+                UserDefaults.standard.removeObject(forKey: "language")
+            } else {
+                UserDefaults.standard.set(languageChoice, forKey: "language")
+            }
+            Updates.relaunch()
+        }
+    }
+    /// The panel's look: "light", "dark", or empty to follow the system.
+    @Published var appearanceChoice: String {
+        didSet { UserDefaults.standard.set(appearanceChoice, forKey: "appearance") }
+    }
+    /// How long each project was worked on, for each period the panel can show.
+    @Published private(set) var timeReports: [TimePeriod: TimeReport] = [:]
+    @Published private(set) var runningTimer: RunningTimer?
+    /// The last stretch the timer measured for each project, which can be taken back.
+    @Published private(set) var lastTimeEntries: [String: TimeEntry] = [:]
+    @Published var timePeriod: TimePeriod {
+        didSet { UserDefaults.standard.set(timePeriod.rawValue, forKey: "timePeriod") }
+    }
+    @Published var showsTime: Bool {
+        didSet { UserDefaults.standard.set(showsTime, forKey: "showsTime") }
+    }
+    /// Works time out from when prompts were typed and answered, without a timer.
+    @Published var tracksTimeAutomatically: Bool {
+        didSet {
+            guard tracksTimeAutomatically != oldValue else { return }
+            UserDefaults.standard.set(tracksTimeAutomatically, forKey: "tracksTimeAutomatically")
+            reload()
+        }
+    }
+    /// A silence longer than this many minutes ends a stretch of automatic time.
+    @Published var idleGapMinutes: Int {
+        didSet {
+            guard idleGapMinutes != oldValue else { return }
+            UserDefaults.standard.set(idleGapMinutes, forKey: "idleGapMinutes")
+            reload()
+        }
+    }
+    static let idleGapChoices = [5, 10, 15, 30]
+    /// Where sessions open, unless their project says otherwise.
+    @Published var openMethod: OpenMethod {
+        didSet { UserDefaults.standard.set(openMethod.rawValue, forKey: "openMethod") }
+    }
+    /// The projects that open their sessions their own way.
+    @Published private(set) var projectOpenMethods: [String: OpenMethod] = [:]
+    /// The ways of opening a session that this Mac has the app for.
+    let openMethods: [OpenMethod] = OpenMethod.allCases.filter { method in
+        method.bundleID.map { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil } ?? true
+    }
     @Published var showingAll: Set<String> = []
     @Published var addingTaskFor: String?
     @Published var renamingProject: String?
@@ -154,10 +223,10 @@ final class Library: ObservableObject {
     @Published private(set) var launchesAtLogin = LoginItem.isEnabled
 
     var searchFocused = true
-    var onOpen: ((SessionRecord) -> Void)?
+    var onOpen: ((SessionRecord, OpenMethod) -> Void)?
     var onOpenInDesktop: ((SessionRecord) -> Void)?
     /// Called with a folder and a first prompt to start a new session.
-    var onStartSession: ((String, String) -> Void)?
+    var onStartSession: ((String, String, OpenMethod) -> Void)?
     /// Called when a session starts waiting or finishes its work.
     var onAttention: ((String, SessionRecord?, LiveSession) -> Void)?
     /// How long a session must have worked before its finishing is worth announcing.
@@ -165,6 +234,7 @@ final class Library: ObservableObject {
     private var workingSince: [String: Date] = [:]
     private var hasSeenLive = false
     private var monitor: Timer?
+    private var heartbeat: Timer?
 
     private let readDB: Database
     private let userDB: Database
@@ -187,6 +257,15 @@ final class Library: ObservableObject {
         readDB = try Database(path: Paths.database)
         userDB = try Database(path: Paths.database)
         expanded = Set(UserDefaults.standard.stringArray(forKey: "expandedProjects") ?? [])
+        checksForUpdates = UserDefaults.standard.bool(forKey: "checksForUpdates")
+        appearanceChoice = UserDefaults.standard.string(forKey: "appearance") ?? ""
+        languageChoice = UserDefaults.standard.string(forKey: "language") ?? ""
+        timePeriod = TimePeriod(rawValue: UserDefaults.standard.integer(forKey: "timePeriod")) ?? .today
+        showsTime = UserDefaults.standard.object(forKey: "showsTime") as? Bool ?? true
+        tracksTimeAutomatically = UserDefaults.standard.object(forKey: "tracksTimeAutomatically") as? Bool ?? true
+        let gap = UserDefaults.standard.integer(forKey: "idleGapMinutes")
+        idleGapMinutes = Self.idleGapChoices.contains(gap) ? gap : 15
+        openMethod = UserDefaults.standard.string(forKey: "openMethod").flatMap(OpenMethod.init) ?? .automatic
         showsOrganizations = UserDefaults.standard.bool(forKey: "showsOrganizations")
         panelEdge = UserDefaults.standard.string(forKey: "panelEdge").flatMap(PanelEdge.init) ?? .right
         showsTodos = UserDefaults.standard.object(forKey: "showsTodos") as? Bool ?? true
@@ -217,20 +296,28 @@ final class Library: ObservableObject {
         var organizations: [Organization] = []
         var tagged: [SessionRecord]?
         var week: [DaySummary] = []
+        var timeReports: [TimePeriod: TimeReport] = [:]
+        var runningTimer: RunningTimer?
+        var lastTimeEntries: [String: TimeEntry] = [:]
+        var openMethods: [String: OpenMethod] = [:]
     }
 
-    /// How the project list is thinned and ordered. Read on the main thread before loading.
+    /// How the project list is thinned and ordered, and how time is counted. Read on the main
+    /// thread before loading.
     private struct ProjectArrangement {
         var sort = ProjectSort.activity
         var hideSingle = false
         var hideInactive = false
         var hidden: Set<String> = []
+        var automaticTime = true
+        var idleGap: TimeInterval = 900
     }
 
     private var projectArrangement: ProjectArrangement {
         ProjectArrangement(
             sort: projectSort, hideSingle: hidesSingleSessionProjects,
-            hideInactive: hidesInactiveProjects, hidden: hiddenProjects
+            hideInactive: hidesInactiveProjects, hidden: hiddenProjects,
+            automaticTime: tracksTimeAutomatically, idleGap: TimeInterval(idleGapMinutes * 60)
         )
     }
 
@@ -265,6 +352,10 @@ final class Library: ObservableObject {
         tasks = snapshot.tasks
         notes = snapshot.notes
         week = snapshot.week
+        timeReports = snapshot.timeReports
+        runningTimer = snapshot.runningTimer
+        lastTimeEntries = snapshot.lastTimeEntries
+        projectOpenMethods = snapshot.openMethods
         organizations = snapshot.organizations
         tagged = snapshot.tagged
         if let tagFilter, !snapshot.tags.contains(where: { $0.id == tagFilter }) { self.tagFilter = nil }
@@ -520,7 +611,119 @@ final class Library: ObservableObject {
         }.prefix(Self.recentCount))
         snapshot.projects = Self.arrange(snapshot.allProjects, by: arrangement, hidden: snapshot.hidden)
         snapshot.week = week(of: snapshot, until: Date())
+        try? readDB.query("SELECT key, method FROM project_open") { row in
+            if let key = row.text(0), let method = row.text(1).flatMap(OpenMethod.init) {
+                snapshot.openMethods[finalKey(key)] = method
+            }
+        }
+        let names = Dictionary(uniqueKeysWithValues: snapshot.allProjects.map { ($0.key, $0.name) })
+        addTime(to: &snapshot, arrangement: arrangement, resolve: finalKey) { key in
+            names[key] ?? customNames[key] ?? defaultNames[key] ?? key
+        }
         return snapshot
+    }
+
+    /// Adds up how long each project was worked on today, this week and this month: what the
+    /// timer measured, and what the moments of prompts and answers suggest.
+    private func addTime(
+        to snapshot: inout Snapshot, arrangement: ProjectArrangement,
+        resolve: (String) -> String, name: (String) -> String, now: Date = Date()
+    ) {
+        let calendar = Self.calendar
+        let nowStamp = now.timeIntervalSince1970
+        let dayStart = calendar.startOfDay(for: now)
+        let starts: [TimePeriod: Double] = [
+            .today: dayStart.timeIntervalSince1970,
+            .week: (calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? dayStart).timeIntervalSince1970,
+            .month: (calendar.dateInterval(of: .month, for: now)?.start ?? dayStart).timeIntervalSince1970,
+        ]
+        let earliest = starts.values.min() ?? nowStamp
+
+        var manual: [String: [TimeSpan]] = [:]
+        try? readDB.query(
+            "SELECT id, project_key, started, ended, open FROM time_entries WHERE ended >= ? OR open = 1 ORDER BY id",
+            [earliest]
+        ) { row in
+            guard let raw = row.text(1), let started = row.double(2), let ended = row.double(3) else { return }
+            let key = resolve(raw), id = Int64(row.int(0))
+            if row.int(4) == 1 {
+                snapshot.runningTimer = RunningTimer(
+                    id: id, projectKey: key, projectName: name(key), started: Date(timeIntervalSince1970: started)
+                )
+                manual[key, default: []].append(TimeSpan(start: started, end: nowStamp))
+            } else {
+                snapshot.lastTimeEntries[key] = TimeEntry(id: id, length: ended - started)
+                manual[key, default: []].append(TimeSpan(start: started, end: ended))
+            }
+        }
+
+        var automatic: [String: [TimeSpan]] = [:]
+        if arrangement.automaticTime {
+            var stamps: [String: [Double]] = [:]
+            try? readDB.query("SELECT session_id, ts FROM messages WHERE ts >= ?", [earliest]) { row in
+                guard let id = row.text(0), let stamp = row.double(1), stamp <= nowStamp,
+                      let key = snapshot.sessions[id]?.projectKey else { return }
+                stamps[key, default: []].append(stamp)
+            }
+            for (key, list) in stamps {
+                automatic[key] = TimeMath.blocks(list.sorted(), gap: arrangement.idleGap)
+            }
+        }
+
+        let keys = Set(manual.keys).union(automatic.keys).subtracting(snapshot.hidden)
+        // A project keeps one color in every period: the busiest take the chart's colors in turn.
+        var lengths: [(key: String, length: TimeInterval)] = []
+        for key in keys {
+            let spans: [TimeSpan] = (manual[key] ?? []) + (automatic[key] ?? [])
+            lengths.append((key, TimeMath.length(TimeMath.merged(spans))))
+        }
+        lengths.sort { $0.length == $1.length ? $0.key < $1.key : $0.length > $1.length }
+        var colors: [String: Int] = [:]
+        for (index, entry) in lengths.prefix(TimePalette.count).enumerated() { colors[entry.key] = index }
+
+        for period in TimePeriod.allCases {
+            let from = starts[period] ?? nowStamp
+            var report = TimeReport(start: from, end: nowStamp)
+            var everything: [TimeSpan] = []
+            var spansByKey: [String: [TimeSpan]] = [:]
+            for key in keys {
+                let timed = TimeMath.clipped(TimeMath.merged(manual[key] ?? []), from: from, to: nowStamp)
+                let guessed = TimeMath.clipped(automatic[key] ?? [], from: from, to: nowStamp)
+                let both = TimeMath.merged(timed + guessed)
+                let total = TimeMath.length(both)
+                // Under a minute is not worth a row, unless its timer is running right now.
+                guard total >= 60 || snapshot.runningTimer?.projectKey == key else { continue }
+                var row = ProjectTime(
+                    key: key, name: name(key), manual: TimeMath.length(timed),
+                    automatic: TimeMath.length(guessed), total: total, color: colors[key]
+                )
+                if period == .today {
+                    row.timed = timed
+                    row.guessed = guessed
+                }
+                report.rows.append(row)
+                spansByKey[key] = both
+                everything += both
+            }
+            report.rows.sort { $0.total == $1.total ? $0.key < $1.key : $0.total > $1.total }
+            report.total = TimeMath.length(TimeMath.merged(everything))
+            if period != .today, let whole = calendar.dateInterval(of: period == .week ? .weekOfYear : .month, for: now) {
+                var day = whole.start
+                while day < whole.end, let next = calendar.date(byAdding: .day, value: 1, to: day) {
+                    var entry = DayTime(day: Format.dayKey(day, in: calendar), date: day)
+                    let head = day.timeIntervalSince1970, tail = next.timeIntervalSince1970
+                    if head <= nowStamp {
+                        for (key, spans) in spansByKey {
+                            let length = TimeMath.length(TimeMath.clipped(spans, from: head, to: tail))
+                            if length > 0 { entry.parts[key] = length }
+                        }
+                    }
+                    report.days.append(entry)
+                    day = next
+                }
+            }
+            snapshot.timeReports[period] = report
+        }
     }
 
     // MARK: - Indexing
@@ -683,14 +886,32 @@ final class Library: ObservableObject {
     @discardableResult
     func openSelection() -> Bool {
         guard !showingSettings, outline == nil, let selection, let session = allSessions[RowKey.sessionID(selection)] else { return false }
-        onOpen?(session)
+        open(session)
         return true
     }
 
-    func open(_ session: SessionRecord) {
+    /// Opens a session the way its project asks for, or the given way just this once.
+    func open(_ session: SessionRecord, with method: OpenMethod? = nil) {
         hover = nil
         attention.remove(session.id)
-        onOpen?(session)
+        onOpen?(session, method ?? openMethod(forProject: session.projectKey))
+    }
+
+    /// The way a project's sessions open: its own choice, or the one from Settings.
+    func openMethod(forProject key: String) -> OpenMethod {
+        let method = projectOpenMethods[key] ?? openMethod
+        return openMethods.contains(method) ? method : .automatic
+    }
+
+    /// Gives a project its own way of opening, or takes it back with nil.
+    func setOpenMethod(_ method: OpenMethod?, for project: ProjectGroup) {
+        let keys = [project.key] + project.mergedKeys
+        write { db in
+            for key in keys { try db.run("DELETE FROM project_open WHERE key = ?", [key]) }
+            if let method {
+                try db.run("INSERT INTO project_open(key, method) VALUES(?, ?)", [project.key, method.rawValue])
+            }
+        }
     }
 
     func openInDesktop(_ session: SessionRecord) {
@@ -730,6 +951,11 @@ final class Library: ObservableObject {
             focusRequest += 1
             return false
         }
+        if showingReleaseNotes {
+            // The notes are opened from Settings, and go back there.
+            showingReleaseNotes = false
+            return false
+        }
         if showingSettings || outline != nil {
             showingSettings = false
             outline = nil
@@ -760,6 +986,7 @@ final class Library: ObservableObject {
     }
 
     func panelDidOpen() {
+        checkForUpdatesIfDue()
         selection = nil
         hover = nil
         selectedDay = Format.dayKey(Date())
@@ -956,6 +1183,11 @@ final class Library: ObservableObject {
         monitor = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             self?.refreshLive()
         }
+        heartbeat?.invalidate()
+        heartbeat = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.recordHeartbeat()
+        }
+        checkForUpdatesIfDue()
     }
 
     /// Takes a fresh reading of the running sessions and works out which ones now need the user:
@@ -1119,7 +1351,7 @@ final class Library: ObservableObject {
                 show(notice: L10n.projectFolderMissing)
                 return
             }
-            onStartSession?(folder, task.text)
+            startSession(in: folder, prompt: task.text, projectKey: project.key)
         }
     }
 
@@ -1129,7 +1361,11 @@ final class Library: ObservableObject {
             show(notice: L10n.projectFolderMissing)
             return
         }
-        onStartSession?(folder, "")
+        startSession(in: folder, prompt: "", projectKey: project.key)
+    }
+
+    private func startSession(in folder: String, prompt: String, projectKey: String) {
+        onStartSession?(folder, prompt, openMethod(forProject: projectKey))
     }
 
     /// A folder of the project that is still on this Mac.
@@ -1199,9 +1435,10 @@ final class Library: ObservableObject {
             return
         }
         if hoverActivity?.key != subject.key { hoverActivity = nil }
+        let gap = TimeInterval(idleGapMinutes * 60)
         readQueue.async { [weak self] in
             guard let self else { return }
-            let series = self.activity(for: subject)
+            let series = self.activity(for: subject, idleGap: gap)
             DispatchQueue.main.async {
                 guard self.hover?.subject.key == subject.key else { return }
                 self.hoverActivity = series
@@ -1210,11 +1447,12 @@ final class Library: ObservableObject {
     }
 
     func loadActivitySync() {
-        hoverActivity = hover.map { activity(for: $0.subject) }
+        hoverActivity = hover.map { activity(for: $0.subject, idleGap: TimeInterval(idleGapMinutes * 60)) }
     }
 
     /// A session is charted across its own lifetime; a project across the last thirty days.
-    private func activity(for subject: HoverSubject) -> ActivitySeries {
+    /// Both come with how long they were worked on in all.
+    private func activity(for subject: HoverSubject, idleGap: TimeInterval) -> ActivitySeries {
         let count = Self.activityBuckets
         var buckets = [Int](repeating: 0, count: count)
         switch subject {
@@ -1233,18 +1471,33 @@ final class Library: ObservableObject {
             return ActivitySeries(
                 key: subject.key, buckets: buckets,
                 startLabel: Format.shortDate(Date(timeIntervalSince1970: first)),
-                endLabel: Format.shortDate(Date(timeIntervalSince1970: last))
+                endLabel: Format.shortDate(Date(timeIntervalSince1970: last)),
+                worked: TimeMath.length(TimeMath.blocks(stamps.sorted(), gap: idleGap))
             )
         case .project(let project):
             let ids = Set(project.sessions.map(\.id))
             let day = 86_400.0
             let end = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 + day
             let start = end - Double(count) * day
-            try? readDB.query("SELECT session_id, ts FROM messages WHERE role = 'u'") { row in
-                guard let id = row.text(0), ids.contains(id), let stamp = row.double(1), stamp >= start, stamp < end else { return }
+            var stamps: [Double] = []
+            try? readDB.query("SELECT session_id, ts, role FROM messages") { row in
+                guard let id = row.text(0), ids.contains(id), let stamp = row.double(1), stamp > 0 else { return }
+                stamps.append(stamp)
+                guard row.text(2) == "u", stamp >= start, stamp < end else { return }
                 buckets[min(Int((stamp - start) / day), count - 1)] += 1
             }
-            return ActivitySeries(key: subject.key, buckets: buckets, startLabel: L10n.daysAgo(count), endLabel: L10n.today.lowercased())
+            // What the timer measured counts too, under any key the project was ever filed as.
+            var spans = TimeMath.blocks(stamps.sorted(), gap: idleGap)
+            let keys = Set([project.key] + project.mergedKeys)
+            let now = Date().timeIntervalSince1970
+            try? readDB.query("SELECT project_key, started, ended, open FROM time_entries") { row in
+                guard let key = row.text(0), keys.contains(key), let started = row.double(1), let ended = row.double(2) else { return }
+                spans.append(TimeSpan(start: started, end: row.int(3) == 1 ? now : ended))
+            }
+            return ActivitySeries(
+                key: subject.key, buckets: buckets, startLabel: L10n.daysAgo(count), endLabel: L10n.today.lowercased(),
+                worked: TimeMath.length(TimeMath.merged(spans))
+            )
         }
     }
 
@@ -1298,6 +1551,114 @@ final class Library: ObservableObject {
         }
     }
 
+    // MARK: - Updates
+
+    /// The release newer than this copy of the app, when one is known.
+    var availableUpdate: String? {
+        if case .available(let version) = updateState { return version }
+        return nil
+    }
+
+    func checkForUpdates() {
+        guard updateState != .checking else { return }
+        updateState = .checking
+        Updates.fetch { [weak self] releases in
+            guard let self else { return }
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastUpdateCheck")
+            self.ingest(releases)
+        }
+    }
+
+    /// Takes what GitHub answered, or nil when it did not.
+    func ingest(_ releases: [Release]?, installed: String = Updates.installed) {
+        guard let releases else {
+            updateState = .failed
+            return
+        }
+        self.releases = releases
+        installedVersion = installed
+        if let latest = releases.first, Updates.isNewer(latest.version, than: installed) {
+            updateState = .available(latest.version)
+        } else {
+            updateState = .current
+        }
+    }
+
+    /// The daily check, for those who turned it on.
+    func checkForUpdatesIfDue() {
+        guard checksForUpdates else { return }
+        let last = UserDefaults.standard.double(forKey: "lastUpdateCheck")
+        if Date().timeIntervalSince1970 - last > 86_400 { checkForUpdates() }
+    }
+
+    // MARK: - Time tracking
+
+    var timeReport: TimeReport { timeReports[timePeriod] ?? TimeReport() }
+
+    func time(for key: String, in period: TimePeriod) -> ProjectTime? {
+        timeReports[period]?.rows.first { $0.key == key }
+    }
+
+    func isTiming(_ key: String) -> Bool {
+        runningTimer?.projectKey == key
+    }
+
+    /// Starts the timer for a project. Only one runs at a time, so any other is stopped.
+    func startTimer(forProject key: String) {
+        guard !isTiming(key) else { return }
+        let now = Date().timeIntervalSince1970
+        write { db in
+            try Self.closeTimers(db, at: now)
+            try db.run("INSERT INTO time_entries(project_key, started, ended, open) VALUES(?, ?, ?, 1)", [key, now, now])
+        }
+    }
+
+    func stopTimer() {
+        guard runningTimer != nil else { return }
+        let now = Date().timeIntervalSince1970
+        write { db in try Self.closeTimers(db, at: now) }
+    }
+
+    func toggleTimer(forProject key: String) {
+        if isTiming(key) { stopTimer() } else { startTimer(forProject: key) }
+    }
+
+    /// Takes back the last stretch the timer measured for a project.
+    func deleteLastTimeEntry(forProject key: String) {
+        guard let entry = lastTimeEntries[key] else { return }
+        write { db in try db.run("DELETE FROM time_entries WHERE id = ? AND open = 0", [entry.id]) }
+    }
+
+    /// Ends whatever is running. A stretch of a few seconds was a slip of the hand and is dropped.
+    private static func closeTimers(_ db: Database, at now: Double) throws {
+        try db.run("UPDATE time_entries SET ended = ?, open = 0 WHERE open = 1", [now])
+        try db.exec("DELETE FROM time_entries WHERE open = 0 AND ended - started < 10")
+    }
+
+    /// Called once when the app starts. A timer left running is picked up again if the app was
+    /// away for a moment (a restart); otherwise it ends where it was last known to be running.
+    func restoreTimer(now: Date = Date()) {
+        _ = try? userDB.run(
+            "UPDATE time_entries SET open = 0 WHERE open = 1 AND ended < ?", [now.timeIntervalSince1970 - 150]
+        )
+        _ = try? userDB.exec("DELETE FROM time_entries WHERE open = 0 AND ended - started < 10")
+    }
+
+    /// Notes that the timer is still running, so that a crash or a power cut loses a minute at most.
+    func recordHeartbeat() {
+        guard let timer = runningTimer else { return }
+        let now = Date().timeIntervalSince1970
+        write { db in try db.run("UPDATE time_entries SET ended = ? WHERE id = ? AND open = 1", [now, timer.id]) }
+    }
+
+    /// The same, done before returning, for when the app is about to quit.
+    func recordHeartbeatSync() {
+        guard let timer = runningTimer else { return }
+        _ = try? userDB.run(
+            "UPDATE time_entries SET ended = ? WHERE id = ? AND open = 1", [Date().timeIntervalSince1970, timer.id]
+        )
+    }
+
     // MARK: - Quick capture
 
     /// Brings the task field up, ready to type. Called by the quick-task shortcut.
@@ -1320,6 +1681,7 @@ final class Library: ObservableObject {
         query = ""
         tagFilter = nil
         showingSettings = false
+        showingReleaseNotes = false
         outline = nil
     }
 
@@ -1630,6 +1992,13 @@ extension Library {
             }
             for (offset, note) in ["Ask Dana about the staging credentials", "Idea: show the cart total while typing a coupon"].enumerated() {
                 try userDB.run("INSERT INTO notes(text, created) VALUES(?, ?)", [note, now - Double(offset + 1) * hour])
+            }
+            // What the timer measured: one stretch the prompts also show, and one they do not.
+            for (project, from, to) in [("storefront", 5.0, 4.1), ("billing-api", 2.9, 2.2), ("docs", 30.0, 28.8)] {
+                try userDB.run(
+                    "INSERT INTO time_entries(project_key, started, ended, open) VALUES(?, ?, ?, 0)",
+                    ["git:acme/" + project, now - from * hour, now - to * hour]
+                )
             }
             try userDB.exec("COMMIT")
         } catch {

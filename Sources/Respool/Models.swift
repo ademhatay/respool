@@ -225,6 +225,8 @@ struct ActivitySeries: Hashable {
     var buckets: [Int]
     var startLabel: String
     var endLabel: String
+    /// How long the subject was worked on in all, once that has been added up.
+    var worked: TimeInterval?
 }
 
 struct HoverTarget: Hashable {
@@ -256,9 +258,15 @@ struct NoteItem: Identifiable, Hashable {
 /// The screen edge the panel opens from.
 enum PanelEdge: String, CaseIterable {
     case right, left, top, bottom
+    /// Wherever the panel was dragged to, at the size it was given.
+    case free
+
+    /// The edges the panel can be docked to.
+    static let edges: [PanelEdge] = [.right, .left, .top, .bottom]
 
     var title: String {
         switch self {
+        case .free: return L10n.edgeFree
         case .right: return L10n.edgeRight
         case .left: return L10n.edgeLeft
         case .top: return L10n.edgeTop
@@ -273,6 +281,7 @@ enum PanelSection {
     static let pinned = "pinned"
     static let recent = "recent"
     static let week = "week"
+    static let time = "time"
     static let projects = "projects"
 }
 
@@ -388,6 +397,29 @@ enum Format {
         monthFormatter.string(from: date).capitalized(with: Locale(identifier: L10n.localeIdentifier))
     }
 
+    private static let releaseFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
+        formatter.dateFormat = "d MMM yyyy"
+        return formatter
+    }()
+
+    static func releaseDate(_ date: Date) -> String {
+        releaseFormatter.string(from: date)
+    }
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: L10n.localeIdentifier)
+        formatter.dateFormat = "EEE"
+        return formatter
+    }()
+
+    /// A day of the week as "Pzt".
+    static func weekday(_ date: Date) -> String {
+        weekdayFormatter.string(from: date)
+    }
+
     /// A day as "Pzt 30 Kas".
     static func shortDay(_ date: Date) -> String {
         shortDayFormatter.string(from: date)
@@ -429,6 +461,26 @@ enum Format {
         }
         let days = hours / 24
         return hours % 24 == 0 ? L10n.days(days) : L10n.daysAndHours(days, hours % 24)
+    }
+
+    /// A running clock, such as 0:42:07.
+    static func clock(_ seconds: TimeInterval) -> String {
+        let whole = max(Int(seconds), 0)
+        return String(format: "%d:%02d:%02d", whole / 3600, whole / 60 % 60, whole % 60)
+    }
+
+    /// Hours and minutes for a narrow place, such as 1:24.
+    static func shortClock(_ seconds: TimeInterval) -> String {
+        let minutes = max(Int(seconds), 0) / 60
+        return String(format: "%d:%02d", minutes / 60, minutes % 60)
+    }
+
+    /// A length of work in hours and minutes, however long: 26 sa 10 dk rather than a day.
+    static func worked(_ seconds: TimeInterval) -> String {
+        let minutes = Int((seconds / 60).rounded())
+        if minutes < 1 { return L10n.underMinute }
+        if minutes < 60 { return L10n.minutes(minutes) }
+        return minutes % 60 == 0 ? L10n.hours(minutes / 60) : L10n.hoursAndMinutes(minutes / 60, minutes % 60)
     }
 
     static func path(_ path: String) -> String {
@@ -484,4 +536,159 @@ enum RelativeTime {
         }
         return otherYear.string(from: date)
     }
+}
+
+// MARK: - Time tracking
+
+/// A stretch of time, as seconds since 1970.
+struct TimeSpan: Hashable {
+    var start: Double
+    var end: Double
+}
+
+/// The periods a project's time is added up over. The raw value is what is saved.
+enum TimePeriod: Int, CaseIterable, Hashable {
+    case today, week, month
+
+    var title: String {
+        switch self {
+        case .today: return L10n.today
+        case .week: return L10n.weekTitle
+        case .month: return L10n.thisMonth
+        }
+    }
+
+    var next: TimePeriod {
+        TimePeriod(rawValue: (rawValue + 1) % Self.allCases.count) ?? .today
+    }
+}
+
+/// How long a project was worked on in one period. `manual` is what the timer measured and
+/// `automatic` what the prompts suggest; `total` counts a minute that is in both only once.
+struct ProjectTime: Identifiable, Hashable {
+    let key: String
+    var name: String
+    var manual: TimeInterval
+    var automatic: TimeInterval
+    var total: TimeInterval
+    /// Which of the chart's colors the project is drawn in; nil once they have run out.
+    var color: Int?
+    /// When the timer ran and when the prompts suggest work, for a period short enough to draw
+    /// moment by moment. Empty for the longer periods.
+    var timed: [TimeSpan] = []
+    var guessed: [TimeSpan] = []
+
+    var id: String { key }
+}
+
+/// One day of a period: how long each project was worked on in it.
+struct DayTime: Identifiable, Hashable {
+    let day: String
+    var date: Date
+    var parts: [String: TimeInterval] = [:]
+
+    var id: String { day }
+    var total: TimeInterval { parts.values.reduce(0, +) }
+}
+
+struct TimeReport: Hashable {
+    var rows: [ProjectTime] = []
+    /// Every project together. Two projects worked on at once count once here.
+    var total: TimeInterval = 0
+    /// When the period began and the moment it was added up.
+    var start: Double = 0
+    var end: Double = 0
+    /// The period day by day, for the periods longer than one.
+    var days: [DayTime] = []
+}
+
+/// The timer that is running now.
+struct RunningTimer: Hashable {
+    let id: Int64
+    let projectKey: String
+    var projectName: String
+    let started: Date
+}
+
+/// A stretch the timer measured and has finished with.
+struct TimeEntry: Hashable {
+    let id: Int64
+    var length: TimeInterval
+}
+
+enum TimeMath {
+    /// Turns moments of activity into stretches of work: moments closer together than `gap`
+    /// belong to one stretch. `stamps` must be in order. A moment on its own has no length.
+    static func blocks(_ stamps: [Double], gap: Double) -> [TimeSpan] {
+        var spans: [TimeSpan] = []
+        for stamp in stamps {
+            if let last = spans.last, stamp - last.end <= gap {
+                spans[spans.count - 1].end = max(last.end, stamp)
+            } else {
+                spans.append(TimeSpan(start: stamp, end: stamp))
+            }
+        }
+        return spans
+    }
+
+    /// The same time with overlaps joined, in order.
+    static func merged(_ spans: [TimeSpan]) -> [TimeSpan] {
+        var result: [TimeSpan] = []
+        for span in spans.sorted(by: { $0.start < $1.start }) where span.end > span.start {
+            if let last = result.last, span.start <= last.end {
+                result[result.count - 1].end = max(last.end, span.end)
+            } else {
+                result.append(span)
+            }
+        }
+        return result
+    }
+
+    /// The parts of the spans that fall between two moments.
+    static func clipped(_ spans: [TimeSpan], from start: Double, to end: Double) -> [TimeSpan] {
+        spans.compactMap { span in
+            let clipped = TimeSpan(start: max(span.start, start), end: min(span.end, end))
+            return clipped.end > clipped.start ? clipped : nil
+        }
+    }
+
+    static func length(_ spans: [TimeSpan]) -> TimeInterval {
+        spans.reduce(0) { $0 + max($1.end - $1.start, 0) }
+    }
+}
+
+// MARK: - Opening sessions
+
+/// Where a session is opened. The raw value is what is saved.
+enum OpenMethod: String, CaseIterable, Hashable {
+    /// Where the session lives: the Claude app for a session it tracks, a terminal for the rest.
+    case automatic
+    case desktop, terminal, iterm, vscode, cursor, zed
+
+    var title: String {
+        switch self {
+        case .automatic: return L10n.openAutomatic
+        case .desktop: return "Claude"
+        case .terminal: return "Terminal"
+        case .iterm: return "iTerm"
+        case .vscode: return "VS Code"
+        case .cursor: return "Cursor"
+        case .zed: return "Zed"
+        }
+    }
+
+    /// The app that does the opening, for the choices that need one installed.
+    var bundleID: String? {
+        switch self {
+        case .automatic, .desktop: return nil
+        case .terminal: return "com.apple.Terminal"
+        case .iterm: return "com.googlecode.iterm2"
+        case .vscode: return "com.microsoft.VSCode"
+        case .cursor: return "com.todesktop.230313mzl4w4u92"
+        case .zed: return "dev.zed.Zed"
+        }
+    }
+
+    /// An editor opens the project's folder; Claude Code is then started in its own terminal.
+    var isEditor: Bool { self == .vscode || self == .cursor || self == .zed }
 }
