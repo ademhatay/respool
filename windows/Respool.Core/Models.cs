@@ -165,6 +165,8 @@ public enum PanelTab { Today, Chats, Time }
 public static class PanelSection
 {
     public const string Waiting = "waiting";
+    /// <summary>The chats prompts were typed in today, on the Today tab.</summary>
+    public const string TodayChats = "todaychats";
     public const string Todos = "todos";
     public const string Notes = "notes";
     public const string Pinned = "pinned";
@@ -173,11 +175,11 @@ public static class PanelSection
     public const string TimeSection = "time";
     public const string Projects = "projects";
 
-    public static readonly string[] All = [Waiting, Todos, Notes, Pinned, Recent, TimeSection, Week, Projects];
+    public static readonly string[] All = [Waiting, TodayChats, Todos, Notes, Pinned, Recent, TimeSection, Week, Projects];
 
     public static PanelTab Tab(string section) => section switch
     {
-        Waiting or Todos or Notes => PanelTab.Today,
+        Waiting or TodayChats or Todos or Notes => PanelTab.Today,
         TimeSection or Week => PanelTab.Time,
         _ => PanelTab.Chats,
     };
@@ -185,6 +187,7 @@ public static class PanelSection
     public static string Title(string section) => section switch
     {
         Waiting => L.WaitingTitle,
+        TodayChats => L.TodayChatsTitle,
         Todos => L.TodosTitle,
         Notes => L.NotesTitle,
         Pinned => L.PinnedTitle,
@@ -325,6 +328,7 @@ public static class RowKey
     public static string Hit(string id) => "hit:" + id;
     public static string Tagged(string id) => "tagged:" + id;
     public static string Waiting(string id) => "waiting:" + id;
+    public static string Today(string id) => "today:" + id;
     public static string Page(string id) => "page:" + id;
 
     public static string SessionId(string key)

@@ -968,6 +968,12 @@ final class Library: ObservableObject {
         return project.sessions.prefix(limit)
     }
 
+    /// The chats prompts were typed in today, the busiest first.
+    var todayWork: [DayWork] {
+        let today = Format.dayKey(Date())
+        return week.first { $0.day == today }?.work ?? []
+    }
+
     private var visibleKeys: [String] {
         if let results { return results.map { RowKey.hit($0.id) } }
         if let tagged { return tagged.map { RowKey.tagged($0.id) } }
@@ -977,6 +983,7 @@ final class Library: ObservableObject {
         for section in sectionOrder where PanelTab.of(section) == tab && isShown(section) && !isCollapsed(section) {
             switch section {
             case PanelSection.waiting: keys += needsYou.map { RowKey.waiting($0.id) }
+            case PanelSection.todayChats: keys += todayWork.map { RowKey.today($0.id) }
             case PanelSection.pinned: keys += pinned.map { RowKey.pin($0.id) }
             case PanelSection.recent: keys += recent.map { RowKey.recent($0.id) }
             case PanelSection.week:

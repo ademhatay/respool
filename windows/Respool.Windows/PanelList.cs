@@ -88,6 +88,7 @@ public sealed partial class PanelWindow
             switch (section)
             {
                 case PanelSection.Waiting: WaitingSection(); break;
+                case PanelSection.TodayChats: TodayChatsSection(); break;
                 case PanelSection.Todos: TodosSection(); break;
                 case PanelSection.Notes: NotesSection(); break;
                 case PanelSection.Pinned: PinnedSection(); break;
@@ -169,6 +170,19 @@ public sealed partial class PanelWindow
                 ? (live.WaitingFor is { Length: > 0 } what ? L.WaitingFor(what) : L.Waiting)
                 : L.Finished;
             _list.Children.Add(SessionRow(session, RowKey.Waiting(session.Id), state + " · " + session.PlaceLabel));
+        }
+    }
+
+    /// <summary>The chats worked in today: the ones prompts were typed in, the busiest first.</summary>
+    private void TodayChatsSection()
+    {
+        var work = Library.TodaySummary?.Work ?? Array.Empty<DayWork>();
+        if (work.Count == 0) return;
+        _list.Children.Add(CollapsibleHeader(PanelSection.TodayChats, work.Count));
+        if (IsCollapsed(PanelSection.TodayChats)) return;
+        foreach (var item in work)
+        {
+            _list.Children.Add(SessionRow(item.Session, RowKey.Today(item.Session.Id), L.PromptsLine(item.Session.PlaceLabel, item.Prompts)));
         }
     }
 

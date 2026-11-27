@@ -318,7 +318,7 @@ enum PanelTab: String, CaseIterable {
 
     static func of(_ section: String) -> PanelTab {
         switch section {
-        case PanelSection.waiting, PanelSection.todos, PanelSection.notes: return .today
+        case PanelSection.waiting, PanelSection.todayChats, PanelSection.todos, PanelSection.notes: return .today
         case PanelSection.time, PanelSection.week: return .time
         default: return .chats
         }
@@ -327,6 +327,8 @@ enum PanelTab: String, CaseIterable {
 
 enum PanelSection {
     static let waiting = "waiting"
+    /// The chats prompts were typed in today, on the Today tab.
+    static let todayChats = "todaychats"
     static let todos = "todos"
     static let notes = "notes"
     static let pinned = "pinned"
@@ -336,11 +338,12 @@ enum PanelSection {
     static let projects = "projects"
 
     /// Every section of the browse list, in the order they come in unless rearranged.
-    static let all = [waiting, todos, notes, pinned, recent, time, week, projects]
+    static let all = [waiting, todayChats, todos, notes, pinned, recent, time, week, projects]
 
     static func title(_ section: String) -> String {
         switch section {
         case waiting: return L10n.waitingTitle
+        case todayChats: return L10n.todayChatsTitle
         case todos: return L10n.todosTitle
         case notes: return L10n.notesTitle
         case pinned: return L10n.pinnedTitle
@@ -565,6 +568,7 @@ enum RowKey {
     static func hit(_ id: String) -> String { "hit:" + id }
     static func tagged(_ id: String) -> String { "tagged:" + id }
     static func waiting(_ id: String) -> String { "waiting:" + id }
+    static func today(_ id: String) -> String { "today:" + id }
     static func page(_ id: String) -> String { "page:" + id }
 
     static func sessionID(_ key: String) -> String {

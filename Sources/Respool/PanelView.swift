@@ -235,6 +235,23 @@ struct PanelView: View {
                     }
                 }
             }
+        case PanelSection.todayChats:
+            let work = library.todayWork
+            if !work.isEmpty {
+                CollapsibleHeader(
+                    library: library, title: L10n.todayChatsTitle,
+                    section: PanelSection.todayChats, count: work.count
+                )
+                if !library.isCollapsed(PanelSection.todayChats) {
+                    ForEach(work) { item in
+                        SessionRow(
+                            library: library, session: item.session,
+                            rowKey: RowKey.today(item.session.id),
+                            detail: L10n.promptsLine(item.session.placeLabel, item.prompts)
+                        )
+                    }
+                }
+            }
         case PanelSection.todos:
             TodoSection(library: library, focus: $focus)
         case PanelSection.notes:

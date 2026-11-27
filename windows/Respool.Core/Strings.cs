@@ -36,6 +36,7 @@ public static partial class L
         "This PC has chats from a single organization; the switcher will not show.");
     public static string OpensInTabs => T("Windows Terminal'de yeni sekmede aç", "Open in a new Windows Terminal tab");
     public static string Billions => T(" Mr", "B");
+    public static string TodayChatsTitle => T("Bugünün sohbetleri", "Today's chats");
     public static string UsesEditorTerminalHelp => T(
         "VS Code, Cursor ya da Zed seçiliyken sohbet editörün içindeki terminalde başlar. Respool komut paletini açıp komutu yapıştırır; bu sırada pano birkaç saniye kullanılır. Editör öne gelmezse sohbet ayrı bir terminalde açılır.",
         "With VS Code, Cursor or Zed chosen, the chat starts in the editor's own terminal. Respool opens the command palette and pastes the command, using the clipboard for a few seconds. If the editor does not come forward, the chat opens in a terminal of its own.");

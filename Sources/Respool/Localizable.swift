@@ -463,6 +463,7 @@ enum L10n {
     static var noReleases: String { tr("Henüz yayımlanmış sürüm yok", "No releases published yet") }
     static func updateMenu(_ version: String) -> String { tr("Yeni sürüm: \(version)…", "New version: \(version)…") }
     static var waitingTitle: String { tr("Sizi bekleyenler", "Waiting for you") }
+    static var todayChatsTitle: String { tr("Bugünün sohbetleri", "Today's chats") }
     static var opensInTabs: String { tr("iTerm'de yeni sekmede aç", "Open in a new iTerm tab") }
     static var welcomeTitle: String { tr("Respool'a hoş geldiniz", "Welcome to Respool") }
     static var welcomeLine: String {
